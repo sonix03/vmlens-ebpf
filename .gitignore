@@ -1,0 +1,6 @@
+/bin/
+/bpf/vmlinux.h
+/internal/ebpf/vmlinux.h
+/internal/ebpf/program.bpf.o
+/data/
+*.log
