@@ -1,0 +1,112 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Agent status",
+      "id": 1,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "max(vmlens_agent_up) by (vm_id, hostname)", 
+      "legendFormat": "{{vm_id}} / {{hostname}}"}],
+      "fieldConfig": {"defaults": {"mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}], 
+      "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0}
+    },
+    {
+      "type": "timeseries",
+      "title": "Total network usage per VM",
+      "id": 2,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(rate(vmlens_network_bytes_total[$__rate_interval])) by (vm_id)", "legendFormat": "{{vm_id}}"}],
+      "fieldConfig": {"defaults": {"unit": "Bps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 18, "x": 6, "y": 0}
+    },
+    {
+      "type": "piechart",
+      "title": "Internal vs external traffic",
+      "id": 3,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(rate(vmlens_network_bytes_total[$__rate_interval])) by (scope)", "legendFormat": "{{scope}}"}],
+      "fieldConfig": {"defaults": {"unit": "Bps"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "right"}},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 8}
+    },
+    {
+      "type": "timeseries",
+      "title": "Egress traffic over time",
+      "id": 4,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(rate(vmlens_network_bytes_total{direction=\"egress\"}[$__rate_interval])) by (vm_id, scope)", "legendFormat": "{{vm_id}} {{scope}}"}],
+      "fieldConfig": {"defaults": {"unit": "Bps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 8}
+    },
+    {
+      "type": "timeseries",
+      "title": "Ingress traffic over time",
+      "id": 5,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(rate(vmlens_network_bytes_total{direction=\"ingress\"}[$__rate_interval])) by (vm_id, scope)", "legendFormat": "{{vm_id}} {{scope}}"}],
+      "fieldConfig": {"defaults": {"unit": "Bps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8}
+    },
+    {
+      "type": "bargauge",
+      "title": "Top process by network usage",
+      "id": 6,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "topk(10, sum(rate(vmlens_network_bytes_total[$__rate_interval])) by (process))", "legendFormat": "{{process}}"}],
+      "fieldConfig": {"defaults": {"unit": "Bps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 16}
+    },
+    {
+      "type": "timeseries",
+      "title": "Connection count by process",
+      "id": 7,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(rate(vmlens_network_connections_total[$__rate_interval])) by (process)", "legendFormat": "{{process}}"}],
+      "fieldConfig": {"defaults": {"unit": "cps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 16}
+    },
+    {
+      "type": "barchart",
+      "title": "Traffic by destination port class",
+      "id": 8,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(rate(vmlens_network_bytes_total[$__rate_interval])) by (port_class)", "legendFormat": "{{port_class}}"}],
+      "fieldConfig": {"defaults": {"unit": "Bps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 16}
+    },
+    {
+      "type": "timeseries",
+      "title": "SSH session activity",
+      "id": 9,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(rate(vmlens_ssh_sessions_total[$__rate_interval])) by (vm_id)", "legendFormat": "{{vm_id}}"}],
+      "fieldConfig": {"defaults": {"unit": "cps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24}
+    },
+    {
+      "type": "timeseries",
+      "title": "External egress spike view",
+      "id": 10,
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(rate(vmlens_network_bytes_total{scope=\"external\",direction=\"egress\"}[1m])) by (vm_id, process)", "legendFormat": "{{vm_id}} / {{process}}"}],
+      "fieldConfig": {"defaults": {"unit": "Bps", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 10000000}]}}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24}
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["vmlens", "ebpf", "network"],
+  "templating": {"list": []},
+  "time": {"from": "now-30m", "to": "now"},
+  "timezone": "browser",
+  "title": "VMLens VM Network Observability",
+  "uid": "vmlens-network",
+  "version": 1
+}

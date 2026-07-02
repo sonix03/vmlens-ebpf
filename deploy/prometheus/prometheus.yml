@@ -1,0 +1,8 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: vmlens-agent
+    static_configs:
+      - targets:
+          - 192.168.2.138:9109

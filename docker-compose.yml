@@ -1,0 +1,91 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-vmlens}
+      POSTGRES_USER: ${POSTGRES_USER:-vmlens}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vmlens}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  backend:
+    build: ./backend
+    environment:
+      LISTEN_ADDR: ":8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:-vmlens}:${POSTGRES_PASSWORD:-vmlens}@postgres:5432/${POSTGRES_DB:-vmlens}?sslmode=disable
+      INTERNAL_CIDRS: ${INTERNAL_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+  agent-web:
+    build: ./agent
+    environment:
+      BACKEND_URL: http://backend:8080
+      MOCK_MODE: "true"
+      AGENT_ID: agent-web-1
+      AGENT_HOSTNAME: vm-web-1
+      MACHINE_ID: mock-machine-web-1
+      TENANT_ID: tenant-demo
+      AGENT_PRIVATE_IPS: 10.10.1.15
+      AGENT_MAC_ADDRESSES: 52:54:00:aa:01:15
+      AGENT_ENVIRONMENT: mock-compose
+      FLOW_INTERVAL: 2s
+    depends_on:
+      - backend
+
+  agent-db:
+    build: ./agent
+    environment:
+      BACKEND_URL: http://backend:8080
+      MOCK_MODE: "true"
+      AGENT_ID: agent-db-1
+      AGENT_HOSTNAME: vm-db-1
+      MACHINE_ID: mock-machine-db-1
+      TENANT_ID: tenant-demo
+      AGENT_PRIVATE_IPS: 10.10.1.30
+      AGENT_MAC_ADDRESSES: 52:54:00:aa:01:30
+      AGENT_ENVIRONMENT: mock-compose
+      FLOW_INTERVAL: 3s
+    depends_on:
+      - backend
+
+  agent-worker:
+    build: ./agent
+    environment:
+      BACKEND_URL: http://backend:8080
+      MOCK_MODE: "true"
+      AGENT_ID: agent-worker-1
+      AGENT_HOSTNAME: vm-worker-1
+      MACHINE_ID: mock-machine-worker-1
+      TENANT_ID: tenant-secondary
+      AGENT_PRIVATE_IPS: 10.20.1.50
+      AGENT_MAC_ADDRESSES: 52:54:00:bb:01:50
+      AGENT_ENVIRONMENT: mock-compose
+      FLOW_INTERVAL: 4s
+    depends_on:
+      - backend
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8080}
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+
+volumes:
+  postgres_data:
+
