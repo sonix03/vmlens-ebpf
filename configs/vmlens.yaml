@@ -1,0 +1,38 @@
+server:
+  listen_addr: "127.0.0.1:9435"
+logging:
+  dir: "/var/log/vmlens"
+  ssh_log_path: "/var/log/vmlens/ssh_sessions.log"
+  process_log_path: "/var/log/vmlens/process_events.log"
+  resource_log_path: "/var/log/vmlens/resource_events.log"
+  network_log_path: "/var/log/vmlens/network_flows.log"
+  analysis_log_path: "/var/log/vmlens/analysis.log"
+  retention_days: 7
+ssh:
+  enabled: true
+  auth_log_path: "/var/log/auth.log"
+  parse_journald: true
+  parse_auth_log: true
+privacy:
+  capture_payload: false
+  capture_keystrokes: false
+  capture_terminal_output: false
+  log_remote_ip: true
+  log_destination_ip: true
+  anonymize_ip: false
+  sanitize_command_args: true
+  enable_remote_upload: false
+metrics:
+  enable_process_labels: true
+  enable_ip_labels: false
+  enable_session_labels: false
+  enable_command_labels: false
+analysis:
+  cpu_high_percent: 80
+  cpu_high_duration_seconds: 30
+  memory_high_bytes: 1073741824
+  network_high_bytes_per_minute: 104857600
+  disk_high_bytes_per_minute: 1073741824
+collection:
+  sample_interval: "5s"
+  bpf_dir: "/usr/lib/vmlens/bpf"

@@ -1,0 +1,17 @@
+[Unit]
+Description=VMLens eBPF SSH Session and Resource Monitor
+After=network-online.target ssh.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/vmlens run --config /etc/vmlens/vmlens.yaml
+Restart=always
+RestartSec=5
+User=root
+NoNewPrivileges=false
+ProtectSystem=strict
+ReadWritePaths=/var/log/vmlens
+
+[Install]
+WantedBy=multi-user.target
