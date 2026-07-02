@@ -5,9 +5,6 @@ VMs on which they run, send heartbeats and metadata-only network flows to a Go
 API, and the API stores an aggregated topology in PostgreSQL. A React Flow UI
 renders the topology and refreshes through Server-Sent Events (SSE).
 
-VMLens does **not** use Prometheus or Grafana. Agents send data directly to the
-backend.
-
 ## Privacy boundary
 
 VMLens collects only relationship metadata:
