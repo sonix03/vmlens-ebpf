@@ -1,119 +1,291 @@
 # VMLens
 
-**VMLens: eBPF-Based SSH Session and Resource Usage Monitor for Linux VMs**
+VMLens is an eBPF-powered VM network relationship tracker. Agents register the
+VMs on which they run, send heartbeats and metadata-only network flows to a Go
+API, and the API stores an aggregated topology in PostgreSQL. A React Flow UI
+renders the topology and refreshes through Server-Sent Events (SSE).
 
-VMLens is a lightweight, local-first Linux VM observability agent. It connects SSH login metadata to descendant processes and their CPU, memory, disk I/O, and network connection metadata so an administrator can explain resource spikes without recording terminal contents.
+VMLens does **not** use Prometheus or Grafana. Agents send data directly to the
+backend.
 
-Typical questions:
+## Privacy boundary
 
-- Which SSH user started the CPU-heavy script?
-- Which process caused a memory or disk spike?
-- Why did outbound internet usage increase?
-- Which commands and process tree belong to an active SSH session?
+VMLens collects only relationship metadata:
 
-## Safety and privacy
+- agent and machine identity;
+- interface names, IP addresses and MAC addresses;
+- TCP/UDP source and destination ports;
+- sent/received byte counters, packets and connection counts;
+- direction, first/last seen timestamps and interface name.
 
-VMLens is for authorized monitoring of systems you own or administer. It does **not** capture passwords, private keys, keystrokes, terminal input/output, file contents, packet payloads, or decrypted TLS traffic. Command arguments are sanitized before logging. Data remains in local JSON Lines files; remote upload is not implemented. See [privacy details](docs/privacy.md).
+VMLens does not capture packet payloads, HTTP bodies, SSH content, database
+queries, file contents, request/response bodies, TLS plaintext or command lines.
 
-## Current v0.1 behavior
-
-- SSH events: follows `/var/log/auth.log`, with `journalctl` fallback.
-- Process lifecycle: `/proc` polling fallback is operational; eBPF exec/exit source programs are provided and built separately.
-- CPU/RSS/disk: sampled from `/proc/<pid>`.
-- Network: TCP connection metadata is mapped from socket inode to PID. Fallback RX/TX values are zero; packet payload is never read.
-- Correlation: follows PID ancestry rooted at the accepted `sshd` process. It does not guess based on UID alone.
-- Metrics: bound to `127.0.0.1:9435` by default.
-
-The eBPF objects are optional in v0.1 and require BTF, clang, bpftool, and libbpf headers (`make bpf`). The host fallback keeps the agent functional on systems where eBPF cannot be built or loaded. See [architecture](docs/architecture.md) for limitations.
-
-## Install on Ubuntu/Debian over SSH
-
-```bash
-git clone https://github.com/YOUR_ORG/vmlens-ebpf.git
-cd vmlens-ebpf
-sudo ./scripts/install.sh
-sudo systemctl enable --now vmlens
-sudo journalctl -u vmlens -f
-```
-
-Build manually (Go 1.22+):
-
-```bash
-make build
-sudo make install
-sudo systemctl enable --now vmlens
-curl http://localhost:9435/metrics
-```
-
-Manual run:
-
-```bash
-sudo ./bin/vmlens run --config configs/vmlens.yaml
-```
-
-## CLI
+## Architecture
 
 ```text
-vmlens run
-vmlens ssh sessions
-vmlens ssh watch
-vmlens ssh inspect <session_id>
-vmlens top [--by cpu|memory|network|disk] [--session <session_id>]
-vmlens processes
-vmlens version
+[customer VM / cloud VM / local VM]
+  vmlens-agent
+    |-- POST /api/agents/register
+    |-- POST /api/agents/heartbeat
+    `-- POST /api/flows/ingest
+                  |
+                  v
+         [Go backend :8080]
+           |-- PostgreSQL
+           |-- REST graph/stats API
+           `-- SSE /api/realtime
+                  |
+                  v
+       [React Flow frontend :3000]
 ```
 
-Non-root CLI queries may be denied because logs are intentionally mode `0640`. Use `sudo` or grant a dedicated read-only group access.
+Registration is automatic. There is no VM-registration screen or required seed
+record. Mock agents use exactly the same registration and ingest APIs as a real
+agent.
 
-Logs are written under `/var/log/vmlens/`: `ssh_sessions.log`, `process_events.log`, `resource_events.log`, `network_flows.log`, and `analysis.log`. Each line is independent JSON.
+## Repository
 
-## Test flow
+```text
+backend/    Go REST API, services, migrations and SSE hub
+agent/      Go agent, identity detection, mock/eBPF collectors and sender
+frontend/   React, TypeScript and React Flow graph
+scripts/    Linux agent install/uninstall scripts
+docker-compose.yml
+```
+
+## Quick start
+
+Requirements:
+
+- Docker Desktop or Docker Engine with Compose;
+- ports `3000`, `5432` and `8080` available.
+
+Start PostgreSQL, the backend, three mock agents and the frontend:
 
 ```bash
-# SSH into VM
-ssh ubuntu@YOUR_VM_IP
-
-# Start VMLens and watch analysis
-sudo systemctl enable --now vmlens
-sudo vmlens ssh watch
-
-# In another SSH session, generate bounded workloads
-bash examples/network-spike.sh
-bash examples/cpu-spike.sh
-
-# Inspect attribution
-sudo vmlens ssh sessions
-sudo vmlens ssh inspect <session_id>
-sudo vmlens top --by cpu --session <session_id>
+cp .env.example .env
+docker compose up -d --build
 ```
 
-The examples are deliberately bounded, but still consume real VM resources. Do not run them on a production VM without capacity review.
+Open:
 
-## Prometheus and Grafana
+- frontend: http://localhost:3000
+- API health: http://localhost:8080/health
+- live graph JSON: http://localhost:8080/api/graph
+
+Mock mode is enabled by default. The Compose stack starts:
+
+- `vm-web-1` at `10.10.1.15`, tenant `tenant-demo`;
+- `vm-db-1` at `10.10.1.30`, tenant `tenant-demo`;
+- `vm-worker-1` at `10.20.1.50`, tenant `tenant-secondary`.
+
+They generate registered internal, cross-tenant, unknown-internal, external,
+TCP and UDP relationships. These are agent registrations, not database seed
+rows.
+
+Useful commands:
 
 ```bash
-docker compose -f deploy/docker-compose.monitoring.yml up -d
+docker compose ps
+docker compose logs -f backend agent-web agent-db agent-worker
+docker compose down
+docker compose down -v   # also deletes local PostgreSQL test data
 ```
 
-On Linux, Compose uses `host-gateway`. If unavailable, replace `host.docker.internal` in `deploy/prometheus.yml` with the host bridge IP, or run Prometheus with host networking. Because VMLens binds loopback by default, a container cannot reach it through the bridge; either change `listen_addr` to a controlled host address with firewall rules or run Prometheus using `network_mode: host` and target `127.0.0.1:9435`.
+## Runtime behavior
 
-Remote access should use SSH tunnels:
+### Auto-registration
+
+On startup an agent detects hostname, `/etc/machine-id`, OS, kernel and network
+interfaces and calls `POST /api/agents/register`. Backend VM identity priority:
+
+1. `machine_id`;
+2. existing `agent_id` mapping;
+3. primary MAC address;
+4. hostname plus primary private IP.
+
+This prevents a normal agent restart from creating a duplicate VM node.
+
+If an unknown internal node already exists for one of the new VM's IPs, the
+backend marks it resolved and rewrites matching relationships to the registered
+VM.
+
+### Heartbeat status
+
+- online: last heartbeat less than 60 seconds ago;
+- stale: last heartbeat between 1 and 5 minutes ago;
+- offline: no heartbeat for more than 5 minutes.
+
+The backend evaluates state every 30 seconds and emits an SSE update when state
+changes.
+
+### Flow aggregation
+
+Flows are aggregated by source VM/IP, destination VM/IP, protocol, destination
+port and scope. A transaction-scoped advisory lock prevents concurrent requests
+from creating duplicate graph edges. Existing counters are incremented and
+`first_seen`/`last_seen` retain the full observed window.
+
+Scopes:
+
+- `internal_same_tenant`;
+- `internal_cross_tenant`;
+- `unknown_internal`;
+- `external_public`;
+- `unknown`.
+
+Internal CIDRs are configured with `INTERNAL_CIDRS`.
+
+## REST API
+
+```text
+GET  /health
+POST /api/agents/register
+POST /api/agents/heartbeat
+GET  /api/agents
+GET  /api/vms
+GET  /api/flows
+POST /api/flows/ingest
+GET  /api/graph
+GET  /api/stats/summary
+GET  /api/stats/top-talkers
+GET  /api/realtime
+```
+
+Register a test agent:
 
 ```bash
-ssh -L 9435:localhost:9435 ubuntu@YOUR_VM_IP
-ssh -L 3000:localhost:3000 ubuntu@YOUR_VM_IP
+curl -X POST http://localhost:8080/api/agents/register \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "agent_id":"agent-manual-test",
+    "hostname":"vm-manual-test",
+    "machine_id":"manual-machine-001",
+    "tenant_id":"tenant-demo",
+    "private_ips":["10.10.1.60"],
+    "mac_addresses":["52:54:00:aa:01:60"],
+    "interfaces":[{"name":"eth0","ip_address":"10.10.1.60","mac_address":"52:54:00:aa:01:60"}],
+    "os":"ubuntu",
+    "kernel":"6.8.0",
+    "agent_version":"0.1.0",
+    "environment":"manual-test"
+  }'
 ```
 
-Default Prometheus labels exclude session IDs, commands, remote IPs, and destination IPs to control cardinality and information exposure.
+Ingest a flow:
 
-## Troubleshooting
+```bash
+curl -X POST http://localhost:8080/api/flows/ingest \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "agent_id":"agent-manual-test",
+    "src_ip":"10.10.1.60",
+    "dst_ip":"8.8.8.8",
+    "src_port":43120,
+    "dst_port":443,
+    "protocol":"tcp",
+    "direction":"egress",
+    "bytes_sent":500000,
+    "bytes_received":900000,
+    "packets":500,
+    "connection_count":2,
+    "first_seen":"2026-07-02T10:00:00Z",
+    "last_seen":"2026-07-02T10:00:05Z",
+    "interface":"eth0"
+  }'
+```
 
-- Permission denied: run the agent as root; eBPF and `/proc/<pid>` access require privileges.
-- Missing kernel headers/BTF: install matching headers; the `/proc` fallback still works.
-- eBPF unsupported: use the fallback and inspect service logs for the exact loader/build error.
-- Missing `auth.log`: enable journald parsing; Ubuntu with journal-only SSH logging is supported.
-- Journald permission: the systemd unit runs as root; manual users need journal access.
-- Prometheus cannot scrape: remember VMLens binds loopback and containers have a separate network namespace.
-- High cardinality: never add session, IP, or full-command labels to shared Prometheus installations.
+Graph filters:
 
-More detail is in [troubleshooting](docs/troubleshooting.md). Contributions must preserve the privacy boundary and include tests. Licensed under MIT.
+```text
+/api/graph?vm_id=vm-id
+/api/graph?scope=external_public
+/api/graph?scope=unknown_internal
+/api/graph?protocol=tcp
+/api/graph?port=5432
+/api/graph?time_range=5m
+/api/graph?min_bytes=10000000
+/api/graph?status=online
+/api/graph?tenant_id=tenant-demo
+/api/graph?agent_id=agent-web-1
+```
+
+Edge weight uses total sent plus received bytes:
+
+```text
+<100 KiB       weight 1
+100 KiB-1 MiB  weight 2
+1-10 MiB       weight 3
+10-100 MiB     weight 4
+>=100 MiB      weight 5
+```
+
+## Install a real agent
+
+Build and install from a checked-out repository on a Linux VM:
+
+```bash
+sudo BACKEND_URL=http://BACKEND_IP:8080 MOCK_MODE=false ./scripts/install-agent.sh
+sudo journalctl -u vmlens-agent -f
+```
+
+For a mock-only installation:
+
+```bash
+sudo BACKEND_URL=http://BACKEND_IP:8080 MOCK_MODE=true ./scripts/install-agent.sh
+```
+
+Uninstall:
+
+```bash
+sudo ./scripts/uninstall-agent.sh
+```
+
+The backend port must be reachable from the VM. Use TLS and authentication
+before exposing an ingest endpoint outside a trusted development network.
+
+## Real eBPF mode
+
+Mock mode needs no root privileges. Real mode requires Linux kernel BTF, clang,
+bpftool, libbpf headers and sufficient BPF/kprobe privileges. Build instructions
+are in `agent/ebpf/README.md`.
+
+The current eBPF program observes best-effort TCP/IPv4 connect, accept, send and
+receive metadata plus UDP send/receive metadata. Byte counters are application
+bytes returned by socket functions, not Ethernet wire bytes. Packet counters are
+zero when the kernel source cannot provide a defensible value.
+
+Kernel function names and signatures must be validated across the production
+kernel support matrix.
+
+## Development
+
+Compile Go services:
+
+```bash
+make test
+make build
+```
+
+Validate frontend in Docker (recommended when the repository is on an NTFS
+mount under WSL):
+
+```bash
+docker build -t vmlens-frontend-check ./frontend
+```
+
+Database migrations are embedded into the backend and applied idempotently at
+startup from `backend/internal/db/migrations`.
+
+## MVP limitations
+
+- ingest endpoints have no authentication or TLS yet;
+- PostgreSQL flow retention/partitioning is not implemented;
+- external ASN, country, provider and reverse-DNS enrichment fields are stored
+  but not populated;
+- the graph limits a response to the 5,000 most recent aggregate rows;
+- real eBPF coverage is IPv4-oriented and requires kernel-level testing;
+- SSE broadcasts invalidation events; the frontend refetches authoritative
+  graph/state instead of applying fragile partial graph mutations.
+
