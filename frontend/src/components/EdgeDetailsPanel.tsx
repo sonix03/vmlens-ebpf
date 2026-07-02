@@ -1,0 +1,23 @@
+import type { GraphEdge } from '../types/graph'
+import { formatBytes } from './StatCards'
+
+export function EdgeDetailsPanel({ edge, onClose }: { edge: GraphEdge; onClose: () => void }) {
+  return <aside className="detail-panel">
+    <button className="close" onClick={onClose}>×</button>
+    <small className="eyebrow">network relationship</small>
+    <h2>{edge.protocol.toUpperCase()} :{edge.dst_port}</h2>
+    <span className={`scope-pill scope-${edge.scope}`}>{edge.scope.replaceAll('_', ' ')}</span>
+    <dl>
+      <dt>Source</dt><dd>{edge.source}</dd>
+      <dt>Target</dt><dd>{edge.target}</dd>
+      <dt>Sent</dt><dd>{formatBytes(edge.bytes_sent)}</dd>
+      <dt>Received</dt><dd>{formatBytes(edge.bytes_received)}</dd>
+      <dt>Packets</dt><dd>{edge.packets.toLocaleString()}</dd>
+      <dt>Connections</dt><dd>{edge.connection_count.toLocaleString()}</dd>
+      <dt>First seen</dt><dd>{new Date(edge.first_seen).toLocaleString()}</dd>
+      <dt>Last seen</dt><dd>{new Date(edge.last_seen).toLocaleString()}</dd>
+      <dt>Weight</dt><dd>{edge.weight} / 5</dd>
+    </dl>
+  </aside>
+}
+

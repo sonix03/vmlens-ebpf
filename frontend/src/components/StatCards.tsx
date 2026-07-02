@@ -1,0 +1,24 @@
+import type { Summary } from '../types/stats'
+
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  return `${(bytes / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`
+}
+
+export function StatCards({ summary }: { summary?: Summary }) {
+  const cards = [
+    ['VMs', summary?.total_vms ?? 0, `${summary?.online_vms ?? 0} online`],
+    ['Relationships', summary?.total_flows ?? 0, 'aggregated edges'],
+    ['Internal', formatBytes(summary?.internal_bytes ?? 0), 'registered traffic'],
+    ['External', formatBytes(summary?.external_bytes ?? 0), 'public destinations'],
+    ['Unknown internal', summary?.unknown_internal_hosts ?? 0, 'awaiting agent'],
+  ]
+  return <section className="stat-grid">
+    {cards.map(([label, value, note]) => <article className="stat-card" key={label}>
+      <span>{label}</span><strong>{value}</strong><small>{note}</small>
+    </article>)}
+  </section>
+}
+
