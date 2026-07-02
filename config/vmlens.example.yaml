@@ -1,0 +1,29 @@
+agent:
+  listen_addr: ":9109"
+  log_level: "info"
+
+vm:
+  tenant_id: "tenant_demo"
+  user_id: "user_demo"
+  vm_id: "vm_demo_001"
+  hostname: ""
+  private_ip: "10.0.1.20"
+  public_ip: "203.0.113.10"
+  region: "local-dev"
+
+network:
+  internal_cidrs:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+    - "127.0.0.0/8"
+  bpf_object: "./internal/ebpf/program.bpf.o"
+
+privacy:
+  collect_cmdline: false
+  redact_secrets: true
+  collect_dns: false
+
+flowlog:
+  enabled: true
+  path: "./data/flows.jsonl"
