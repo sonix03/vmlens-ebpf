@@ -27,7 +27,7 @@ type Config struct {
 }
 
 func Load() (Config, error) {
-	mockMode, err := strconv.ParseBool(env("MOCK_MODE", "true"))
+	mockMode, err := strconv.ParseBool(env("MOCK_MODE", "false"))
 	if err != nil {
 		return Config{}, fmt.Errorf("parse MOCK_MODE: %w", err)
 	}

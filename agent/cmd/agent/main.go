@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -35,6 +37,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	client := sender.New(cfg.BackendURL, cfg.HTTPTimeout)
+	controlPlane := newEndpointFilter(cfg.BackendURL)
 
 	result, err := registerUntilReady(ctx, client, registration)
 	if err != nil {
@@ -64,6 +67,12 @@ func run() error {
 				events = nil
 				continue
 			}
+			// Do not observe the observability transport itself. Sending an ingest
+			// request creates socket activity; forwarding that activity again would
+			// create a self-amplifying control-plane feedback loop.
+			if ignoreFlow(controlPlane, event.DstIP) {
+				continue
+			}
 			if err := sendFlow(ctx, client, event); err != nil {
 				log.Printf("send flow: %v", err)
 			}
@@ -78,6 +87,44 @@ func run() error {
 		}
 	}
 	return nil
+}
+
+type endpointFilter struct{ addresses map[string]struct{} }
+
+func newEndpointFilter(rawURL string) endpointFilter {
+	filter := endpointFilter{addresses: map[string]struct{}{}}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return filter
+	}
+	host := parsed.Hostname()
+	if ip := net.ParseIP(host); ip != nil {
+		filter.addresses[ip.String()] = struct{}{}
+		return filter
+	}
+	if addresses, err := net.LookupIP(host); err == nil {
+		for _, address := range addresses {
+			filter.addresses[address.String()] = struct{}{}
+		}
+	}
+	return filter
+}
+
+func (f endpointFilter) matches(ip string) bool {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+	_, excluded := f.addresses[parsed.String()]
+	return excluded
+}
+
+func ignoreFlow(controlPlane endpointFilter, destination string) bool {
+	address := net.ParseIP(destination)
+	if address == nil || address.IsUnspecified() || address.IsLoopback() {
+		return true
+	}
+	return controlPlane.matches(destination)
 }
 
 func registerUntilReady(ctx context.Context, client *sender.Sender, registration model.Registration) (model.RegistrationResult, error) {

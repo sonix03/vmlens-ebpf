@@ -13,8 +13,8 @@ func NewVMService(pool *pgxpool.Pool) *VMService { return &VMService{pool: pool}
 
 func (s *VMService) List(ctx context.Context) ([]model.VM, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, COALESCE(tenant_id, ''), COALESCE(private_ip::text, ''),
-		       COALESCE(public_ip::text, ''), COALESCE(mac_address, ''), COALESCE(host_id, ''),
+		SELECT id, name, COALESCE(tenant_id, ''), COALESCE(host(private_ip), ''),
+		       COALESCE(host(public_ip), ''), COALESCE(mac_address, ''), COALESCE(host_id, ''),
 		       COALESCE(role, ''), discovered_by, COALESCE(agent_id, ''), COALESCE(machine_id, ''),
 		       status, first_seen, last_seen, created_at
 		FROM vms ORDER BY name`)
@@ -35,7 +35,7 @@ func (s *VMService) List(ctx context.Context) ([]model.VM, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	ifaceRows, err := s.pool.Query(ctx, `SELECT vm_id, interface_name, COALESCE(ip_address::text, ''), COALESCE(mac_address, '') FROM vm_interfaces ORDER BY interface_name`)
+	ifaceRows, err := s.pool.Query(ctx, `SELECT vm_id, interface_name, COALESCE(host(ip_address), ''), COALESCE(mac_address, '') FROM vm_interfaces ORDER BY interface_name`)
 	if err != nil {
 		return nil, err
 	}

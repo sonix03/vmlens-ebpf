@@ -153,7 +153,7 @@ func (s *FlowService) List(ctx context.Context, limit int) ([]model.Flow, error)
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT id::text, COALESCE(agent_id, ''), COALESCE(src_vm_id, ''), COALESCE(dst_vm_id, ''),
-		       src_ip::text, dst_ip::text, COALESCE(src_port, 0), COALESCE(dst_port, 0),
+		       host(src_ip), host(dst_ip), COALESCE(src_port, 0), COALESCE(dst_port, 0),
 		       protocol, direction, scope, bytes_sent, bytes_received, packets, connection_count,
 		       first_seen, last_seen, COALESCE(interface_name, ''), created_at
 		FROM network_flows ORDER BY last_seen DESC LIMIT $1`, limit)

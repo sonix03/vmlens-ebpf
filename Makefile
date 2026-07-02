@@ -18,7 +18,7 @@ down:
 	docker compose down
 
 logs:
-	docker compose logs -f backend agent-web agent-db agent-worker frontend
+	docker compose logs -f backend frontend postgres
 
 clean:
 	docker compose down -v --remove-orphans

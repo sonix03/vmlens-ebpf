@@ -4,13 +4,12 @@ import {
   type Edge, type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import type { GraphData, GraphEdge, GraphNode } from '../types/graph'
+import type { GraphData, GraphNode } from '../types/graph'
 import { formatBytes } from './StatCards'
 
 interface Props {
   graph: GraphData
   onNodeSelect: (node: GraphNode) => void
-  onEdgeSelect: (edge: GraphEdge) => void
 }
 
 const nodeColors: Record<string, string> = {
@@ -21,7 +20,7 @@ const scopeColors: Record<string, string> = {
   unknown_internal: '#f59e0b', external_public: '#60a5fa', unknown: '#94a3b8',
 }
 
-export function GraphView({ graph, onNodeSelect, onEdgeSelect }: Props) {
+export function GraphView({ graph, onNodeSelect }: Props) {
   const nodes = useMemo<Node[]>(() => graph.nodes.map((node, index) => {
     const angle = (index / Math.max(graph.nodes.length, 1)) * Math.PI * 2
     const radius = Math.max(220, graph.nodes.length * 24)
@@ -56,7 +55,6 @@ export function GraphView({ graph, onNodeSelect, onEdgeSelect }: Props) {
     <ReactFlow
       nodes={nodes} edges={edges} fitView fitViewOptions={{ padding: 0.2 }} minZoom={0.15}
       onNodeClick={(_, node) => { const original = graph.nodes.find((item) => item.id === node.id); if (original) onNodeSelect(original) }}
-      onEdgeClick={(_, edge) => { const original = graph.edges.find((item) => item.id === edge.id); if (original) onEdgeSelect(original) }}
     >
       <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#26354a" />
       <Controls position="bottom-left" />
@@ -64,4 +62,3 @@ export function GraphView({ graph, onNodeSelect, onEdgeSelect }: Props) {
     </ReactFlow>
   </div>
 }
-

@@ -4,3 +4,9 @@
 /internal/ebpf/program.bpf.o
 /data/
 *.log
+.env
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+agent/ebpf/vmlinux.h
+agent/ebpf/*.o

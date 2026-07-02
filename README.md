@@ -37,9 +37,8 @@ queries, file contents, request/response bodies, TLS plaintext or command lines.
        [React Flow frontend :3000]
 ```
 
-Registration is automatic. There is no VM-registration screen or required seed
-record. Mock agents use exactly the same registration and ingest APIs as a real
-agent.
+Registration is automatic. There is no VM-registration screen, required seed
+record, or demo VM in the default stack.
 
 ## Repository
 
@@ -58,7 +57,7 @@ Requirements:
 - Docker Desktop or Docker Engine with Compose;
 - ports `3000`, `5432` and `8080` available.
 
-Start PostgreSQL, the backend, three mock agents and the frontend:
+Start PostgreSQL, the backend and the frontend:
 
 ```bash
 cp .env.example .env
@@ -71,21 +70,15 @@ Open:
 - API health: http://localhost:8080/health
 - live graph JSON: http://localhost:8080/api/graph
 
-Mock mode is enabled by default. The Compose stack starts:
-
-- `vm-web-1` at `10.10.1.15`, tenant `tenant-demo`;
-- `vm-db-1` at `10.10.1.30`, tenant `tenant-demo`;
-- `vm-worker-1` at `10.20.1.50`, tenant `tenant-secondary`.
-
-They generate registered internal, cross-tenant, unknown-internal, external,
-TCP and UDP relationships. These are agent registrations, not database seed
-rows.
+The graph starts empty by design. Install the script on a real VM; that VM
+registers itself and appears as a node without a page refresh. Relationships
+appear when the real collector sends flows.
 
 Useful commands:
 
 ```bash
 docker compose ps
-docker compose logs -f backend agent-web agent-db agent-worker
+docker compose logs -f backend frontend postgres
 docker compose down
 docker compose down -v   # also deletes local PostgreSQL test data
 ```
@@ -205,7 +198,7 @@ Graph filters:
 /api/graph?min_bytes=10000000
 /api/graph?status=online
 /api/graph?tenant_id=tenant-demo
-/api/graph?agent_id=agent-web-1
+/api/graph?agent_id=agent-id
 ```
 
 Edge weight uses total sent plus received bytes:
@@ -223,14 +216,23 @@ Edge weight uses total sent plus received bytes:
 Build and install from a checked-out repository on a Linux VM:
 
 ```bash
+sudo apt-get update
+sudo apt-get install -y golang-go clang bpftool libbpf-dev
 sudo BACKEND_URL=http://BACKEND_IP:8080 MOCK_MODE=false ./scripts/install-agent.sh
 sudo journalctl -u vmlens-agent -f
 ```
 
-For a mock-only installation:
+The installer builds the Go binary and compiles the eBPF object against the
+target VM's own kernel BTF. On successful startup the VM registers immediately;
+it appears as a node before the first network edge is observed.
+
+For a VM behind NAT, register both the guest interface and reachable/NAT IP:
 
 ```bash
-sudo BACKEND_URL=http://BACKEND_IP:8080 MOCK_MODE=true ./scripts/install-agent.sh
+sudo env BACKEND_URL=http://BACKEND_IP:8080 \
+  TENANT_ID=tenant-name \
+  AGENT_PRIVATE_IPS=192.168.1.144,10.20.20.103 \
+  bash scripts/install-agent.sh
 ```
 
 Uninstall:
@@ -244,7 +246,7 @@ before exposing an ingest endpoint outside a trusted development network.
 
 ## Real eBPF mode
 
-Mock mode needs no root privileges. Real mode requires Linux kernel BTF, clang,
+The installed agent runs real mode by default. It requires Linux kernel BTF, clang,
 bpftool, libbpf headers and sufficient BPF/kprobe privileges. Build instructions
 are in `agent/ebpf/README.md`.
 
@@ -285,4 +287,3 @@ startup from `backend/internal/db/migrations`.
 - real eBPF coverage is IPv4-oriented and requires kernel-level testing;
 - SSE broadcasts invalidation events; the frontend refetches authoritative
   graph/state instead of applying fragile partial graph mutations.
-

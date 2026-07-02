@@ -28,54 +28,6 @@ services:
     ports:
       - "8080:8080"
 
-  agent-web:
-    build: ./agent
-    environment:
-      BACKEND_URL: http://backend:8080
-      MOCK_MODE: "true"
-      AGENT_ID: agent-web-1
-      AGENT_HOSTNAME: vm-web-1
-      MACHINE_ID: mock-machine-web-1
-      TENANT_ID: tenant-demo
-      AGENT_PRIVATE_IPS: 10.10.1.15
-      AGENT_MAC_ADDRESSES: 52:54:00:aa:01:15
-      AGENT_ENVIRONMENT: mock-compose
-      FLOW_INTERVAL: 2s
-    depends_on:
-      - backend
-
-  agent-db:
-    build: ./agent
-    environment:
-      BACKEND_URL: http://backend:8080
-      MOCK_MODE: "true"
-      AGENT_ID: agent-db-1
-      AGENT_HOSTNAME: vm-db-1
-      MACHINE_ID: mock-machine-db-1
-      TENANT_ID: tenant-demo
-      AGENT_PRIVATE_IPS: 10.10.1.30
-      AGENT_MAC_ADDRESSES: 52:54:00:aa:01:30
-      AGENT_ENVIRONMENT: mock-compose
-      FLOW_INTERVAL: 3s
-    depends_on:
-      - backend
-
-  agent-worker:
-    build: ./agent
-    environment:
-      BACKEND_URL: http://backend:8080
-      MOCK_MODE: "true"
-      AGENT_ID: agent-worker-1
-      AGENT_HOSTNAME: vm-worker-1
-      MACHINE_ID: mock-machine-worker-1
-      TENANT_ID: tenant-secondary
-      AGENT_PRIVATE_IPS: 10.20.1.50
-      AGENT_MAC_ADDRESSES: 52:54:00:bb:01:50
-      AGENT_ENVIRONMENT: mock-compose
-      FLOW_INTERVAL: 4s
-    depends_on:
-      - backend
-
   frontend:
     build:
       context: ./frontend
@@ -88,4 +40,3 @@ services:
 
 volumes:
   postgres_data:
-
