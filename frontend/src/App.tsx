@@ -28,7 +28,13 @@ export function App() {
     } finally { setLoading(false) }
   }, [])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    void load()
+    // SSE remains the fast path, while polling guarantees status changes are
+    // reflected even if a browser/proxy silently drops a realtime event.
+    const interval = window.setInterval(() => void load(), 10_000)
+    return () => window.clearInterval(interval)
+  }, [load])
   useEffect(() => connectRealtime(() => {
     window.clearTimeout(debounce.current)
     debounce.current = window.setTimeout(() => void load(), 300)

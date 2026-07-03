@@ -108,7 +108,7 @@ VM.
 - offline: no heartbeat for more than 5 minutes;
 - retained as an offline inventory node when heartbeats stop.
 
-The backend evaluates state every 30 seconds and emits an SSE update when state
+The backend evaluates state every 10 seconds and emits an SSE update when state
 changes. `VM_DELETE_AFTER=0` is the default, so offline nodes are retained.
 Heartbeat timeout is best-effort: without a cloud-provider deletion webhook the
 backend cannot distinguish a deleted VM from a long power/network outage. A
