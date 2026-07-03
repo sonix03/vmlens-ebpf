@@ -162,8 +162,14 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 		sourceID := row.SrcVMID
 		if sourceID == "" {
 			sourceID = "unknown-source-" + nodeSafe(row.SrcIP)
-		}
-		if _, ok := nodes[sourceID]; !ok {
+			if _, ok := nodes[sourceID]; !ok {
+				nodeType := "unknown"
+				if row.Scope == "unknown_internal" || strings.HasPrefix(row.Scope, "internal_") {
+					nodeType = "unknown_internal"
+				}
+				nodes[sourceID] = &model.GraphNode{ID: sourceID, Type: nodeType, Label: row.SrcIP, IP: row.SrcIP, Status: "unknown"}
+			}
+		} else if _, ok := nodes[sourceID]; !ok {
 			node := vmNode(sourceID, valueOr(row.SrcName, row.SrcIP), valueOr(row.SrcPrivateIP, row.SrcIP), valueOr(row.SrcStatus, "unknown"), row.SrcTenant, row.SrcRole)
 			nodes[sourceID] = &node
 		}
@@ -225,14 +231,13 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 	return result, nil
 }
 
-func visibleVM(vm model.VM, requestedStatus string, now time.Time) bool {
+func visibleVM(vm model.VM, requestedStatus string, _ time.Time) bool {
 	if requestedStatus != "" {
 		return vm.Status == requestedStatus
 	}
-	// The default graph is a live topology. Derive liveness from last_seen as
-	// well as the persisted status so a delayed status sweep cannot leave a
-	// ghost node visible.
-	return vm.Status == "online" && !vm.LastSeen.Before(now.Add(-time.Minute))
+	// Disconnected VMs remain inventory nodes. A cloud lifecycle integration
+	// can explicitly remove or mark a truly deleted instance.
+	return vm.Status != "deleted"
 }
 
 func vmNode(id, name, ip, status, tenant, role string) model.GraphNode {

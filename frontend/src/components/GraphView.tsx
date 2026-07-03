@@ -12,7 +12,7 @@ interface Props {
 }
 
 const statusColors: Record<string, string> = {
-  online: '#34d399', stale: '#f59e0b', offline: '#64748b', unknown: '#94a3b8',
+  online: '#32ff75', stale: '#f59e0b', offline: '#64748b', unknown: '#94a3b8',
 }
 
 function positionFor(index: number, count: number) {
@@ -30,6 +30,7 @@ export function GraphView({ graph, onNodeSelect }: Props) {
 
   const nodes = useMemo<Node[]>(() => vmNodes.map((node, index) => {
     const color = statusColors[node.status || 'unknown'] || statusColors.unknown
+    const online = node.status === 'online'
     return {
       id: node.id,
       position: positionFor(index, vmNodes.length),
@@ -37,9 +38,11 @@ export function GraphView({ graph, onNodeSelect }: Props) {
         label: <div className="node-label"><i style={{ background: color }} /><strong>{node.label}</strong></div>,
       },
       style: {
-        background: '#101927', border: `1px solid ${color}99`, color: '#e5edf7',
+        background: '#101927', border: online ? `2px solid ${color}` : `1px solid ${color}66`, color: '#e5edf7',
         borderRadius: 12, minWidth: 170,
-        boxShadow: `0 12px 35px #0008, 0 0 20px ${color}12`, padding: '14px 16px',
+        boxShadow: online ? `0 0 14px ${color}cc, 0 0 34px ${color}66` : '0 12px 35px #0008',
+        opacity: online ? 1 : 0.62,
+        padding: '14px 16px',
       },
     }
   }), [vmNodes])
@@ -50,10 +53,10 @@ export function GraphView({ graph, onNodeSelect }: Props) {
     const relationships = new Map<string, { source: string; target: string; weight: number }>()
     graph.edges.forEach((edge) => {
       if (!vmIDs.has(edge.source) || !vmIDs.has(edge.target)) return
-	  if (edge.source === edge.target) return
-	  const [source, target] = [edge.source, edge.target].sort()
-	  const key = `${source}<->${target}`
-	  const current = relationships.get(key) || { source, target, weight: 1 }
+      if (edge.source === edge.target) return
+      const [source, target] = [edge.source, edge.target].sort()
+      const key = `${source}<->${target}`
+      const current = relationships.get(key) || { source, target, weight: 1 }
       current.weight = Math.max(current.weight, edge.weight)
       relationships.set(key, current)
     })
@@ -63,7 +66,7 @@ export function GraphView({ graph, onNodeSelect }: Props) {
       source: relationship.source,
       target: relationship.target,
       animated: true,
-	  markerStart: { type: MarkerType.ArrowClosed, color: '#5eead4' },
+      markerStart: { type: MarkerType.ArrowClosed, color: '#5eead4' },
       markerEnd: { type: MarkerType.ArrowClosed, color: '#5eead4' },
       style: {
         stroke: '#5eead4',

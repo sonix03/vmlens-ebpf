@@ -44,8 +44,8 @@ export function App() {
   const vmIDs = new Set(graph.nodes.filter((node) => node.type === 'vm').map((node) => node.id))
   const relationshipCount = new Set(
     graph.edges
-	  .filter((edge) => vmIDs.has(edge.source) && vmIDs.has(edge.target) && edge.source !== edge.target)
-	  .map((edge) => [edge.source, edge.target].sort().join('<->')),
+      .filter((edge) => vmIDs.has(edge.source) && vmIDs.has(edge.target) && edge.source !== edge.target)
+      .map((edge) => [edge.source, edge.target].sort().join('<->')),
   ).size
 
   return <main className="app-shell">

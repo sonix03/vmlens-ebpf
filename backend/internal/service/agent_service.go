@@ -231,25 +231,37 @@ func (s *AgentService) List(ctx context.Context) ([]model.Agent, error) {
 }
 
 func (s *AgentService) UpdateStatuses(ctx context.Context) error {
-	tag, err := s.pool.Exec(ctx, `
-		WITH updated AS (
-			UPDATE agents SET status = CASE
-				WHEN last_seen >= NOW() - INTERVAL '1 minute' THEN 'online'
-				WHEN last_seen >= NOW() - INTERVAL '5 minutes' THEN 'stale'
-				ELSE 'offline' END
-			WHERE status IS DISTINCT FROM CASE
-				WHEN last_seen >= NOW() - INTERVAL '1 minute' THEN 'online'
-				WHEN last_seen >= NOW() - INTERVAL '5 minutes' THEN 'stale'
-				ELSE 'offline' END
-			RETURNING id
-		)
-		UPDATE vms v SET status = a.status, last_seen = a.last_seen
-		FROM agents a WHERE v.agent_id = a.id AND v.status IS DISTINCT FROM a.status`)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() > 0 {
-		s.hub.Broadcast("status.changed", map[string]any{"updated": tag.RowsAffected()})
+	defer tx.Rollback(ctx)
+	agentTag, err := tx.Exec(ctx, `
+		UPDATE agents SET status = CASE
+			WHEN last_seen >= NOW() - INTERVAL '1 minute' THEN 'online'
+			WHEN last_seen >= NOW() - INTERVAL '5 minutes' THEN 'stale'
+			ELSE 'offline' END
+		WHERE status IS DISTINCT FROM CASE
+			WHEN last_seen >= NOW() - INTERVAL '1 minute' THEN 'online'
+			WHEN last_seen >= NOW() - INTERVAL '5 minutes' THEN 'stale'
+			ELSE 'offline' END`)
+	if err != nil {
+		return err
+	}
+	vmTag, err := tx.Exec(ctx, `
+		UPDATE vms v SET status = a.status, last_seen = a.last_seen
+		FROM agents a
+		WHERE v.agent_id = a.id
+		  AND (v.status IS DISTINCT FROM a.status OR v.last_seen IS DISTINCT FROM a.last_seen)`)
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	updated := agentTag.RowsAffected() + vmTag.RowsAffected()
+	if updated > 0 {
+		s.hub.Broadcast("status.changed", map[string]any{"updated": updated})
 	}
 	return nil
 }

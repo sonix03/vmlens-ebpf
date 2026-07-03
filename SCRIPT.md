@@ -161,17 +161,18 @@ Invoke-RestMethod "http://127.0.0.1:8080/api/graph?time_range=5m"
 
 ## 6. Perilaku ketika VM dihapus
 
-Ketika VM benar-benar hilang, heartbeat berhenti. Node berubah menjadi
-`offline` setelah 5 menit dan dihapus dari topology setelah 15 menit secara
-default. Nilai ini dikendalikan oleh `VM_DELETE_AFTER` pada `.env` laptop.
+Ketika heartbeat berhenti, node tetap menjadi inventory. Warnanya berubah dari
+terang menjadi `stale`, lalu `offline` setelah 5 menit. Timeout tidak menghapus
+record secara default.
 
 ```env
-VM_DELETE_AFTER=15m
+VM_DELETE_AFTER=0
 ```
 
 Backend tidak dapat membedakan VM yang dihapus dengan VM yang mati atau putus
-jaringan tanpa API cloud provider. Karena itu penghapusan memakai timeout dan
-tidak dilakukan seketika.
+jaringan tanpa API OpenStack. Penghapusan node saat instance dihapus akan
+memerlukan integrasi lifecycle OpenStack; sementara itu node dipertahankan
+sebagai offline inventory.
 
 ## Troubleshooting cepat
 

@@ -106,17 +106,18 @@ VM.
 - online: last heartbeat less than 60 seconds ago;
 - stale: last heartbeat between 1 and 5 minutes ago;
 - offline: no heartbeat for more than 5 minutes;
-- deleted from the live topology: no heartbeat for `VM_DELETE_AFTER` (15 minutes by default).
+- retained as an offline inventory node when heartbeats stop.
 
 The backend evaluates state every 30 seconds and emits an SSE update when state
-changes or a node is deleted. Set `VM_DELETE_AFTER=0` to retain offline nodes.
+changes. `VM_DELETE_AFTER=0` is the default, so offline nodes are retained.
 Heartbeat timeout is best-effort: without a cloud-provider deletion webhook the
 backend cannot distinguish a deleted VM from a long power/network outage. A
 still-running agent automatically registers again after connectivity returns.
 
-The default graph is a live topology: a VM disappears from the frontend after
-60 seconds without heartbeat. Its offline record remains queryable with
-`/api/graph?status=offline` until permanent cleanup runs.
+The graph doubles as VM inventory: online nodes have a bright green border and
+shadow, while stale/offline nodes remain visible but dimmed. A node is removed
+only when its VM record is explicitly deleted (for example by a future
+OpenStack lifecycle integration).
 
 ### Flow aggregation
 

@@ -23,7 +23,7 @@ func Load() (Config, error) {
 		InternalCIDRs:     csv(env("INTERNAL_CIDRS", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8")),
 		AllowedOrigins:    csv(env("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")),
 		StatusSweepPeriod: 30 * time.Second,
-		VMDeleteAfter:     15 * time.Minute,
+		VMDeleteAfter:     0,
 	}
 	if raw := os.Getenv("STATUS_SWEEP_PERIOD"); raw != "" {
 		d, err := time.ParseDuration(raw)
