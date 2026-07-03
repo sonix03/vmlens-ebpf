@@ -102,6 +102,7 @@ func (h *Handlers) ListFlows(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) GetGraph(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	filter, err := graphFilter(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

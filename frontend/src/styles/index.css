@@ -20,4 +20,11 @@ button, input, select { font: inherit; }
 .status-badge,.scope-pill { display: inline-block; padding: 3px 8px; border-radius: 20px; font: 9px 'JetBrains Mono'; text-transform: uppercase; }.status-online { color: #34d399; background: #34d39918; }.status-stale { color: #f59e0b; background: #f59e0b18; }.status-offline { color: #f87171; background: #f8717118; }.status-unknown,.status-external { color: #94a3b8; background: #94a3b818; }.scope-pill { color: #60a5fa; background: #60a5fa18; }
 .error-banner { display: flex; gap: 12px; margin-bottom: 12px; padding: 10px 14px; border: 1px solid #7f1d1d; border-radius: 8px; background: #450a0a66; font-size: 11px; }.error-banner span { color: #fca5a5; }
 footer { display: flex; justify-content: space-between; margin-top: 13px; color: #536176; font-size: 10px; }
+.legend .edge-line::before { width: 18px; height: 1px; border-radius: 0; vertical-align: middle; background: #5eead4; }
+.node-label { display: flex; align-items: center; justify-content: center; gap: 9px; text-align: center; }
+.node-label i { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; box-shadow: 0 0 10px currentColor; }
+.node-label strong { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.react-flow__node { cursor: pointer; transition: border-color .15s ease, transform .15s ease; }
+.react-flow__node:hover { transform: translateY(-2px); }
+.react-flow__node.selected { outline: 2px solid #5eead455; outline-offset: 3px; }
 @media (max-width: 1200px) { .app-shell { padding: 0 16px 18px; }.stat-grid { gap: 7px; }.filter-bar { gap: 6px; }.filter-bar select { width: 120px; } }

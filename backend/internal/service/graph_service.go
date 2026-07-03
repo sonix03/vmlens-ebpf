@@ -126,7 +126,10 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 	if err != nil {
 		return model.Graph{}, err
 	}
+	vmByID := make(map[string]model.VM, len(vms))
+	now := time.Now()
 	for _, vm := range vms {
+		vmByID[vm.ID] = vm
 		if filter.AgentID != "" && vm.AgentID != filter.AgentID {
 			continue
 		}
@@ -136,7 +139,7 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 		if filter.VMID != "" && vm.ID != filter.VMID {
 			continue
 		}
-		if filter.Status != "" && vm.Status != filter.Status {
+		if !visibleVM(vm, filter.Status, now) {
 			continue
 		}
 		node := vmNode(vm.ID, vm.Name, vm.PrivateIP, vm.Status, vm.TenantID, vm.Role)
@@ -144,6 +147,18 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 	}
 
 	for _, row := range flowRows {
+		// A historical flow must not resurrect a registered VM that is absent
+		// from the live/default node set (offline, stale, or filtered out).
+		if _, registered := vmByID[row.SrcVMID]; registered {
+			if _, visible := nodes[row.SrcVMID]; !visible {
+				continue
+			}
+		}
+		if _, registered := vmByID[row.DstVMID]; registered {
+			if _, visible := nodes[row.DstVMID]; !visible {
+				continue
+			}
+		}
 		sourceID := row.SrcVMID
 		if sourceID == "" {
 			sourceID = "unknown-source-" + nodeSafe(row.SrcIP)
@@ -208,6 +223,16 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 	sort.Slice(result.Nodes, func(i, j int) bool { return result.Nodes[i].ID < result.Nodes[j].ID })
 	sort.Slice(result.Edges, func(i, j int) bool { return result.Edges[i].ID < result.Edges[j].ID })
 	return result, nil
+}
+
+func visibleVM(vm model.VM, requestedStatus string, now time.Time) bool {
+	if requestedStatus != "" {
+		return vm.Status == requestedStatus
+	}
+	// The default graph is a live topology. Derive liveness from last_seen as
+	// well as the persisted status so a delayed status sweep cannot leave a
+	// ghost node visible.
+	return vm.Status == "online" && !vm.LastSeen.Before(now.Add(-time.Minute))
 }
 
 func vmNode(id, name, ip, status, tenant, role string) model.GraphNode {

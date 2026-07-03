@@ -22,6 +22,7 @@ type Config struct {
 	PrivateIPs        []string
 	PublicIP          string
 	MACAddresses      []string
+	IgnoreIPs         []string
 	Environment       string
 	AgentVersion      string
 }
@@ -50,6 +51,7 @@ func Load() (Config, error) {
 		Hostname: os.Getenv("AGENT_HOSTNAME"), MachineID: os.Getenv("MACHINE_ID"),
 		TenantID: os.Getenv("TENANT_ID"), PrivateIPs: csv(os.Getenv("AGENT_PRIVATE_IPS")),
 		PublicIP: os.Getenv("AGENT_PUBLIC_IP"), MACAddresses: csv(os.Getenv("AGENT_MAC_ADDRESSES")),
+		IgnoreIPs:   csv(os.Getenv("IGNORE_IPS")),
 		Environment: env("AGENT_ENVIRONMENT", "local"), AgentVersion: env("AGENT_VERSION", "0.1.0"),
 	}, nil
 }

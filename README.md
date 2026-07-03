@@ -105,10 +105,18 @@ VM.
 
 - online: last heartbeat less than 60 seconds ago;
 - stale: last heartbeat between 1 and 5 minutes ago;
-- offline: no heartbeat for more than 5 minutes.
+- offline: no heartbeat for more than 5 minutes;
+- deleted from the live topology: no heartbeat for `VM_DELETE_AFTER` (15 minutes by default).
 
 The backend evaluates state every 30 seconds and emits an SSE update when state
-changes.
+changes or a node is deleted. Set `VM_DELETE_AFTER=0` to retain offline nodes.
+Heartbeat timeout is best-effort: without a cloud-provider deletion webhook the
+backend cannot distinguish a deleted VM from a long power/network outage. A
+still-running agent automatically registers again after connectivity returns.
+
+The default graph is a live topology: a VM disappears from the frontend after
+60 seconds without heartbeat. Its offline record remains queryable with
+`/api/graph?status=offline` until permanent cleanup runs.
 
 ### Flow aggregation
 
@@ -230,9 +238,38 @@ For a VM behind NAT, register both the guest interface and reachable/NAT IP:
 
 ```bash
 sudo env BACKEND_URL=http://BACKEND_IP:8080 \
-  TENANT_ID=tenant-name \
   AGENT_PRIVATE_IPS=192.168.1.144,10.20.20.103 \
   bash scripts/install-agent.sh
+```
+
+## Test communication between two VMs
+
+Both VM agents must be registered, and the destination address observed by the
+source must match an IP registered by the destination VM. Use the same tenant
+name on both agents when testing same-tenant topology.
+
+On VM B, start a temporary bounded test server (allow TCP 8081 only between the
+two test VMs in the firewall/security group):
+
+```bash
+python3 -m http.server 8081 --bind 0.0.0.0
+```
+
+On VM A, generate three HTTP connections to VM B's private IP:
+
+```bash
+cd vmlens-ebpf
+bash scripts/test-vm-communication.sh VM_B_PRIVATE_IP 8081
+```
+
+The backend resolves `dst_ip` to VM B, emits `flow.updated` over SSE, and the UI
+draws an animated A → B line. Reverse the test from VM B to VM A to verify both
+directions. Check resolution directly if the line does not appear:
+
+```bash
+curl http://BACKEND_IP:8080/api/vms
+curl http://BACKEND_IP:8080/api/flows
+curl http://BACKEND_IP:8080/api/graph?time_range=5m
 ```
 
 Uninstall:

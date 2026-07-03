@@ -5,12 +5,12 @@ import { StatusBadge } from './StatusBadge'
 export function NodeDetailsPanel({ node, onClose }: { node: GraphNode; onClose: () => void }) {
   return <aside className="detail-panel">
     <button className="close" onClick={onClose}>×</button>
-    <small className="eyebrow">{node.type.replace('_', ' ')}</small>
+    <small className="eyebrow">VIRTUAL MACHINE</small>
     <h2>{node.label}</h2>
     <StatusBadge status={node.status} />
     <dl>
-      <dt>Node ID</dt><dd>{node.id}</dd>
-      <dt>IP address</dt><dd>{node.ip || '—'}</dd>
+      <dt>VM ID</dt><dd>{node.id}</dd>
+      <dt>Primary IP</dt><dd>{node.ip || '—'}</dd>
       <dt>Tenant</dt><dd>{node.tenant_id || 'unassigned'}</dd>
       <dt>Role</dt><dd>{node.role || 'unassigned'}</dd>
       <dt>Traffic in</dt><dd>{formatBytes(node.traffic_in)}</dd>
@@ -18,4 +18,3 @@ export function NodeDetailsPanel({ node, onClose }: { node: GraphNode; onClose: 
     </dl>
   </aside>
 }
-

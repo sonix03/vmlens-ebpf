@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/vmlens/vmlens/agent/internal/config"
@@ -57,12 +59,22 @@ func Collect(cfg config.Config) (model.Registration, error) {
 
 func networkIdentity() ([]model.Interface, []string, []string) {
 	list, _ := net.Interfaces()
+	defaultInterfaces := defaultRouteInterfaces()
 	interfaces := []model.Interface{}
 	privateIPs := []string{}
 	macs := []string{}
 	for _, iface := range list {
-		if iface.Flags&net.FlagLoopback != 0 {
+		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
 			continue
+		}
+		// On Linux, prefer interfaces that own a default route. This mirrors
+		// `ip route show default` and avoids registering Docker/veth bridges as
+		// VM identity. If no route can be read, retain the portable all-interface
+		// fallback.
+		if len(defaultInterfaces) > 0 {
+			if _, ok := defaultInterfaces[iface.Name]; !ok {
+				continue
+			}
 		}
 		mac := iface.HardwareAddr.String()
 		if mac != "" {
@@ -85,6 +97,31 @@ func networkIdentity() ([]model.Interface, []string, []string) {
 		}
 	}
 	return interfaces, unique(privateIPs), unique(macs)
+}
+
+func defaultRouteInterfaces() map[string]struct{} {
+	file, err := os.Open("/proc/net/route")
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+	return parseDefaultRouteInterfaces(file)
+}
+
+func parseDefaultRouteInterfaces(reader io.Reader) map[string]struct{} {
+	result := map[string]struct{}{}
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 4 || fields[0] == "Iface" || fields[1] != "00000000" {
+			continue
+		}
+		flags, err := strconv.ParseUint(fields[3], 16, 32)
+		if err == nil && flags&1 != 0 {
+			result[fields[0]] = struct{}{}
+		}
+	}
+	return result
 }
 
 func operatingSystem() string {

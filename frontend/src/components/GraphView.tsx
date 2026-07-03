@@ -1,64 +1,96 @@
 import { useMemo } from 'react'
 import {
-  Background, BackgroundVariant, Controls, MarkerType, MiniMap, ReactFlow,
+  Background, BackgroundVariant, Controls, MarkerType, ReactFlow,
   type Edge, type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { GraphData, GraphNode } from '../types/graph'
-import { formatBytes } from './StatCards'
 
 interface Props {
   graph: GraphData
   onNodeSelect: (node: GraphNode) => void
 }
 
-const nodeColors: Record<string, string> = {
-  vm: '#34d399', unknown_internal: '#f59e0b', external: '#60a5fa', unknown: '#94a3b8',
+const statusColors: Record<string, string> = {
+  online: '#34d399', stale: '#f59e0b', offline: '#64748b', unknown: '#94a3b8',
 }
-const scopeColors: Record<string, string> = {
-  internal_same_tenant: '#34d399', internal_cross_tenant: '#a78bfa',
-  unknown_internal: '#f59e0b', external_public: '#60a5fa', unknown: '#94a3b8',
+
+function positionFor(index: number, count: number) {
+  if (count === 1) return { x: 0, y: 0 }
+  const angle = (index / count) * Math.PI * 2 - Math.PI / 2
+  const radius = Math.max(210, count * 30)
+  return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius }
 }
 
 export function GraphView({ graph, onNodeSelect }: Props) {
-  const nodes = useMemo<Node[]>(() => graph.nodes.map((node, index) => {
-    const angle = (index / Math.max(graph.nodes.length, 1)) * Math.PI * 2
-    const radius = Math.max(220, graph.nodes.length * 24)
-    const color = nodeColors[node.type] || nodeColors.unknown
+  // Only registered VMs belong on the main topology. Destination IPs and other
+  // metadata remain available from the backend without becoming graph nodes.
+  const vmNodes = useMemo(() => graph.nodes.filter((node) => node.type === 'vm'), [graph.nodes])
+  const vmIDs = useMemo(() => new Set(vmNodes.map((node) => node.id)), [vmNodes])
+
+  const nodes = useMemo<Node[]>(() => vmNodes.map((node, index) => {
+    const color = statusColors[node.status || 'unknown'] || statusColors.unknown
     return {
       id: node.id,
-      position: { x: Math.cos(angle) * radius + radius, y: Math.sin(angle) * radius + radius },
-      data: { label: <div className="node-label"><strong>{node.label}</strong><span>{node.ip || node.type}</span></div> },
+      position: positionFor(index, vmNodes.length),
+      data: {
+        label: <div className="node-label"><i style={{ background: color }} /><strong>{node.label}</strong></div>,
+      },
       style: {
-        background: '#101927', border: `2px solid ${color}`, color: '#e5edf7',
-        borderRadius: node.type === 'external' ? 28 : 12, minWidth: 142,
-        boxShadow: `0 0 24px ${color}22`, padding: '11px 14px',
+        background: '#101927', border: `1px solid ${color}99`, color: '#e5edf7',
+        borderRadius: 12, minWidth: 170,
+        boxShadow: `0 12px 35px #0008, 0 0 20px ${color}12`, padding: '14px 16px',
       },
     }
-  }), [graph.nodes])
+  }), [vmNodes])
 
-  const edges = useMemo<Edge[]>(() => graph.edges.map((edge) => {
-    const color = scopeColors[edge.scope] || scopeColors.unknown
-    return {
-      id: edge.id, source: edge.source, target: edge.target,
-      label: `${edge.protocol.toUpperCase()}:${edge.dst_port} · ${formatBytes(edge.bytes_sent + edge.bytes_received)}`,
-      animated: edge.weight >= 4,
-      markerEnd: { type: MarkerType.ArrowClosed, color },
-      style: { stroke: color, strokeWidth: 1 + edge.weight * 0.65 },
-      labelStyle: { fill: '#b9c8da', fontSize: 11 },
-      labelBgStyle: { fill: '#0b1220', fillOpacity: 0.9 },
-    }
-  }), [graph.edges])
+  const edges = useMemo<Edge[]>(() => {
+    // Several ports/protocols between the same VM pair become one visual edge.
+    // Individual aggregated flows remain available in the backend.
+    const relationships = new Map<string, { source: string; target: string; weight: number }>()
+    graph.edges.forEach((edge) => {
+      if (!vmIDs.has(edge.source) || !vmIDs.has(edge.target)) return
+	  if (edge.source === edge.target) return
+	  const [source, target] = [edge.source, edge.target].sort()
+	  const key = `${source}<->${target}`
+	  const current = relationships.get(key) || { source, target, weight: 1 }
+      current.weight = Math.max(current.weight, edge.weight)
+      relationships.set(key, current)
+    })
+
+    return Array.from(relationships.entries()).map(([id, relationship]) => ({
+      id,
+      source: relationship.source,
+      target: relationship.target,
+      animated: true,
+	  markerStart: { type: MarkerType.ArrowClosed, color: '#5eead4' },
+      markerEnd: { type: MarkerType.ArrowClosed, color: '#5eead4' },
+      style: {
+        stroke: '#5eead4',
+        strokeWidth: Math.min(4, 1.25 + relationship.weight * 0.4),
+        opacity: 0.72,
+      },
+    }))
+  }, [graph.edges, vmIDs])
 
   return <div className="graph-canvas">
-    {graph.nodes.length === 0 && <div className="graph-empty"><strong>Waiting for agents</strong><span>Nodes appear automatically after registration.</span></div>}
+    {vmNodes.length === 0 && <div className="graph-empty"><strong>Waiting for VM</strong><span></span></div>}
     <ReactFlow
-      nodes={nodes} edges={edges} fitView fitViewOptions={{ padding: 0.2 }} minZoom={0.15}
-      onNodeClick={(_, node) => { const original = graph.nodes.find((item) => item.id === node.id); if (original) onNodeSelect(original) }}
+      nodes={nodes}
+      edges={edges}
+      fitView
+      fitViewOptions={{ padding: 0.25 }}
+      minZoom={0.15}
+      nodesDraggable={false}
+      nodesConnectable={false}
+      elementsSelectable
+      onNodeClick={(_, node) => {
+        const original = vmNodes.find((item) => item.id === node.id)
+        if (original) onNodeSelect(original)
+      }}
     >
       <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#26354a" />
       <Controls position="bottom-left" />
-      <MiniMap nodeColor={(node) => graph.nodes.find((item) => item.id === node.id) ? nodeColors[graph.nodes.find((item) => item.id === node.id)!.type] : '#64748b'} maskColor="#080d16cc" />
     </ReactFlow>
   </div>
 }

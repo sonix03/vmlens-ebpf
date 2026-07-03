@@ -37,14 +37,14 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	client := sender.New(cfg.BackendURL, cfg.HTTPTimeout)
-	controlPlane := newEndpointFilter(cfg.BackendURL)
+	controlPlane := newEndpointFilter(cfg.BackendURL, cfg.IgnoreIPs)
 
 	result, err := registerUntilReady(ctx, client, registration)
 	if err != nil {
 		return err
 	}
 	log.Printf("registered agent=%s vm=%s hostname=%s mock=%t", result.AgentID, result.VMID, registration.Hostname, cfg.MockMode)
-	go heartbeat.Run(ctx, registration.AgentID, cfg.HeartbeatInterval, client)
+	go heartbeat.Run(ctx, registration, cfg.HeartbeatInterval, client)
 
 	var source collector.Collector
 	if cfg.MockMode {
@@ -91,8 +91,13 @@ func run() error {
 
 type endpointFilter struct{ addresses map[string]struct{} }
 
-func newEndpointFilter(rawURL string) endpointFilter {
+func newEndpointFilter(rawURL string, ignoredIPs []string) endpointFilter {
 	filter := endpointFilter{addresses: map[string]struct{}{}}
+	for _, raw := range ignoredIPs {
+		if ip := net.ParseIP(raw); ip != nil {
+			filter.addresses[ip.String()] = struct{}{}
+		}
+	}
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return filter

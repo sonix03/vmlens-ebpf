@@ -254,6 +254,67 @@ func (s *AgentService) UpdateStatuses(ctx context.Context) error {
 	return nil
 }
 
+// DeleteExpired removes agent-backed VM nodes only after they have missed
+// heartbeats for the configured retention window. The delay is intentionally
+// longer than the five-minute offline threshold because heartbeat loss cannot
+// prove that a cloud VM was actually deleted.
+func (s *AgentService) DeleteExpired(ctx context.Context, deleteAfter time.Duration) (int64, error) {
+	if deleteAfter <= 0 {
+		return 0, nil
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, `
+		SELECT v.id
+		FROM vms v
+		JOIN agents a ON a.vm_id = v.id
+		WHERE v.discovered_by = 'agent'
+		  AND GREATEST(v.last_seen, a.last_seen) < NOW() - $1::interval
+		FOR UPDATE OF v, a SKIP LOCKED`, fmt.Sprintf("%f seconds", deleteAfter.Seconds()))
+	if err != nil {
+		return 0, err
+	}
+	var vmIDs []string
+	seenVMs := map[string]struct{}{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if _, seen := seenVMs[id]; !seen {
+			seenVMs[id] = struct{}{}
+			vmIDs = append(vmIDs, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+	if len(vmIDs) == 0 {
+		if err := tx.Commit(ctx); err != nil {
+			return 0, err
+		}
+		return 0, nil
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM agents WHERE vm_id = ANY($1)`, vmIDs); err != nil {
+		return 0, fmt.Errorf("delete expired agents: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM vms WHERE id = ANY($1)`, vmIDs); err != nil {
+		return 0, fmt.Errorf("delete expired VMs: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	s.hub.Broadcast("vm.deleted", map[string]any{"vm_ids": vmIDs})
+	return int64(len(vmIDs)), nil
+}
+
 func stableVMID(reg model.AgentRegistration, ip, mac string) string {
 	identity := firstNonEmpty([]string{reg.MachineID, reg.AgentID, mac, reg.Hostname + "|" + ip})
 	sum := sha256.Sum256([]byte(identity))

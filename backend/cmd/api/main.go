@@ -65,6 +65,12 @@ func run() error {
 				if err := agents.UpdateStatuses(context.Background()); err != nil {
 					log.Printf("status sweep: %v", err)
 				}
+				deleted, err := agents.DeleteExpired(context.Background(), cfg.VMDeleteAfter)
+				if err != nil {
+					log.Printf("expired VM cleanup: %v", err)
+				} else if deleted > 0 {
+					log.Printf("expired VM cleanup: deleted %d node(s)", deleted)
+				}
 			}
 		}
 	}()

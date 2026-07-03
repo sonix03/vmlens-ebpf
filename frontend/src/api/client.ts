@@ -7,7 +7,7 @@ import type { VM } from '../types/vm'
 export const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || 'http://localhost:8080'
 
 async function get<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`)
+  const response = await fetch(`${API_URL}${path}`, { cache: 'no-store' })
   if (!response.ok) {
     const message = await response.text()
     throw new Error(`${response.status} ${response.statusText}: ${message}`)
@@ -32,4 +32,3 @@ export const api = {
   vms: () => get<VM[]>('/api/vms'),
   flows: () => get<Flow[]>('/api/flows'),
 }
-
