@@ -15,4 +15,4 @@ for attempt in 1 2 3; do
   echo "request ${attempt}/3 completed"
   sleep 1
 done
-echo "Flow sent. The VM-to-VM edge should appear after backend ingest/SSE refresh."
+echo "Flow sent. The VM-to-VM edge should animate, then become dim after the activity window."
