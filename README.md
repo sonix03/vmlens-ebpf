@@ -136,6 +136,19 @@ Scopes:
 
 Internal CIDRs are configured with `INTERNAL_CIDRS`.
 
+### Live communication lines
+
+An edge is bright and animated while the backend continues receiving TCP/UDP
+activity for that VM relationship. After no new activity is observed for
+`FLOW_ACTIVE_WINDOW` (default `3s`), its animation stops and the historical
+relationship remains as a dim static line. The browser evaluates the expiry
+locally, so a line can stop without waiting for the 10-second polling fallback.
+
+This is transport-level activity, not an HTTP request parser. HTTPS, HTTP/2,
+connection pooling and non-HTTP protocols can reuse one connection, so exact
+application request boundaries require application tracing such as
+OpenTelemetry. See `INSTRUCTION.md` for supported communication and tests.
+
 ## REST API
 
 ```text
