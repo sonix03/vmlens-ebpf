@@ -27,6 +27,9 @@ export interface GraphEdge {
   connection_count: number
   first_seen: string
   last_seen: string
+  last_observed_at: string
+  active: boolean
+  active_until: string
   weight: number
 }
 
@@ -44,4 +47,3 @@ export interface GraphFilters {
   min_bytes: string
   status: string
 }
-

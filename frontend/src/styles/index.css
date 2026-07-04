@@ -21,6 +21,9 @@ button, input, select { font: inherit; }
 .error-banner { display: flex; gap: 12px; margin-bottom: 12px; padding: 10px 14px; border: 1px solid #7f1d1d; border-radius: 8px; background: #450a0a66; font-size: 11px; }.error-banner span { color: #fca5a5; }
 footer { display: flex; justify-content: space-between; margin-top: 13px; color: #536176; font-size: 10px; }
 .legend .edge-line::before { width: 18px; height: 1px; border-radius: 0; vertical-align: middle; background: #5eead4; }
+.legend .idle-line::before { background: #475569; opacity: .7; }
+.react-flow__edge.traffic-active .react-flow__edge-path { filter: drop-shadow(0 0 4px #5eead488); }
+.react-flow__edge.traffic-idle .react-flow__edge-path { transition: stroke .2s ease, opacity .2s ease; }
 .node-label { display: flex; align-items: center; justify-content: center; gap: 9px; text-align: center; }
 .node-label i { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; box-shadow: 0 0 10px currentColor; }
 .node-label strong { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }

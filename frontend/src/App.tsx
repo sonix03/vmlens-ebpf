@@ -64,7 +64,7 @@ export function App() {
       <div className="graph-card">
         <div className="graph-heading">
           <div><small>VM TOPOLOGY</small></div>
-          <div className="legend"><span className="vm-dot">Virtual machine</span><span className="edge-line">Communication</span></div>
+          <div className="legend"><span className="vm-dot">Virtual machine</span><span className="edge-line active-line">Active traffic</span><span className="edge-line idle-line">Idle history</span></div>
         </div>
         {loading ? <div className="loading">Loading live topology...</div> : <GraphView graph={graph} onNodeSelect={setSelectedNode} />}
       </div>

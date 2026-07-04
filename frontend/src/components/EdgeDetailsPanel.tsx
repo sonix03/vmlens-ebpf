@@ -16,8 +16,9 @@ export function EdgeDetailsPanel({ edge, onClose }: { edge: GraphEdge; onClose: 
       <dt>Connections</dt><dd>{edge.connection_count.toLocaleString()}</dd>
       <dt>First seen</dt><dd>{new Date(edge.first_seen).toLocaleString()}</dd>
       <dt>Last seen</dt><dd>{new Date(edge.last_seen).toLocaleString()}</dd>
+      <dt>Last observed</dt><dd>{new Date(edge.last_observed_at).toLocaleString()}</dd>
+      <dt>Traffic state</dt><dd>{Date.parse(edge.active_until) > Date.now() ? 'active' : 'idle'}</dd>
       <dt>Weight</dt><dd>{edge.weight} / 5</dd>
     </dl>
   </aside>
 }
-

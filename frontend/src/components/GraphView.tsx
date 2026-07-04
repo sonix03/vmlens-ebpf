@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Background, BackgroundVariant, Controls, MarkerType, ReactFlow,
   type Edge, type Node,
@@ -23,6 +23,13 @@ function positionFor(index: number, count: number) {
 }
 
 export function GraphView({ graph, onNodeSelect }: Props) {
+  const [clock, setClock] = useState(() => Date.now())
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setClock(Date.now()), 250)
+    return () => window.clearInterval(interval)
+  }, [])
+
   // Only registered VMs belong on the main topology. Destination IPs and other
   // metadata remain available from the backend without becoming graph nodes.
   const vmNodes = useMemo(() => graph.nodes.filter((node) => node.type === 'vm'), [graph.nodes])
@@ -50,31 +57,41 @@ export function GraphView({ graph, onNodeSelect }: Props) {
   const edges = useMemo<Edge[]>(() => {
     // Several ports/protocols between the same VM pair become one visual edge.
     // Individual aggregated flows remain available in the backend.
-    const relationships = new Map<string, { source: string; target: string; weight: number }>()
+    const relationships = new Map<string, { source: string; target: string; weight: number; activeUntil: number }>()
     graph.edges.forEach((edge) => {
       if (!vmIDs.has(edge.source) || !vmIDs.has(edge.target)) return
       if (edge.source === edge.target) return
       const [source, target] = [edge.source, edge.target].sort()
       const key = `${source}<->${target}`
-      const current = relationships.get(key) || { source, target, weight: 1 }
+      const parsedActiveUntil = Date.parse(edge.active_until)
+      const activeUntil = Number.isFinite(parsedActiveUntil)
+        ? parsedActiveUntil
+        : (edge.active ? Date.parse(edge.last_observed_at) + 3000 : 0)
+      const current = relationships.get(key) || { source, target, weight: 1, activeUntil: 0 }
       current.weight = Math.max(current.weight, edge.weight)
+      current.activeUntil = Math.max(current.activeUntil, activeUntil)
       relationships.set(key, current)
     })
 
-    return Array.from(relationships.entries()).map(([id, relationship]) => ({
-      id,
-      source: relationship.source,
-      target: relationship.target,
-      animated: true,
-      markerStart: { type: MarkerType.ArrowClosed, color: '#5eead4' },
-      markerEnd: { type: MarkerType.ArrowClosed, color: '#5eead4' },
-      style: {
-        stroke: '#5eead4',
-        strokeWidth: Math.min(4, 1.25 + relationship.weight * 0.4),
-        opacity: 0.72,
-      },
-    }))
-  }, [graph.edges, vmIDs])
+    return Array.from(relationships.entries()).map(([id, relationship]) => {
+      const active = relationship.activeUntil > clock
+      const color = active ? '#5eead4' : '#475569'
+      return {
+        id,
+        source: relationship.source,
+        target: relationship.target,
+        animated: active,
+        className: active ? 'traffic-active' : 'traffic-idle',
+        markerStart: { type: MarkerType.ArrowClosed, color },
+        markerEnd: { type: MarkerType.ArrowClosed, color },
+        style: {
+          stroke: color,
+          strokeWidth: active ? Math.min(4, 1.25 + relationship.weight * 0.4) : 1,
+          opacity: active ? 0.9 : 0.3,
+        },
+      }
+    })
+  }, [clock, graph.edges, vmIDs])
 
   return <div className="graph-canvas">
     {vmNodes.length === 0 && <div className="graph-empty"><strong>Waiting for VM</strong><span></span></div>}
