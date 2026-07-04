@@ -27,3 +27,18 @@ func TestVisibleVMExplicitStatusSupportsAudit(t *testing.T) {
 		t.Fatal("explicit offline query should return offline VM")
 	}
 }
+
+func TestSetEdgeActivity(t *testing.T) {
+	now := time.Date(2026, time.July, 4, 12, 0, 0, 0, time.UTC)
+	active := model.GraphEdge{}
+	setEdgeActivity(&active, now, now.Add(-2*time.Second), 3*time.Second)
+	if !active.Active || !active.ActiveUntil.Equal(now.Add(time.Second)) {
+		t.Fatalf("expected active edge until %s, got active=%t until=%s", now.Add(time.Second), active.Active, active.ActiveUntil)
+	}
+
+	idle := model.GraphEdge{}
+	setEdgeActivity(&idle, now, now.Add(-4*time.Second), 3*time.Second)
+	if idle.Active {
+		t.Fatal("expected edge to become idle after the activity window")
+	}
+}

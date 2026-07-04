@@ -114,7 +114,8 @@ func (s *FlowService) Ingest(ctx context.Context, event model.FlowEvent) (model.
 				first_seen = LEAST(first_seen, $6),
 				last_seen = GREATEST(last_seen, $7),
 				agent_id = $8,
-				interface_name = COALESCE($9, interface_name)
+				interface_name = COALESCE($9, interface_name),
+				observed_at = NOW()
 			WHERE id = $1::uuid`, flowID, event.BytesSent, event.BytesReceived, event.Packets,
 			event.ConnectionCount, event.FirstSeen, event.LastSeen, event.AgentID, nullIfEmpty(event.Interface))
 	}

@@ -12,12 +12,13 @@ import (
 )
 
 type GraphService struct {
-	pool      *pgxpool.Pool
-	vmService *VMService
+	pool             *pgxpool.Pool
+	vmService        *VMService
+	flowActiveWindow time.Duration
 }
 
-func NewGraphService(pool *pgxpool.Pool, vmService *VMService) *GraphService {
-	return &GraphService{pool: pool, vmService: vmService}
+func NewGraphService(pool *pgxpool.Pool, vmService *VMService, flowActiveWindow time.Duration) *GraphService {
+	return &GraphService{pool: pool, vmService: vmService, flowActiveWindow: flowActiveWindow}
 }
 
 type graphFlowRow struct {
@@ -35,6 +36,7 @@ type graphFlowRow struct {
 	Connections   int64
 	FirstSeen     time.Time
 	LastSeen      time.Time
+	ObservedAt    time.Time
 	SrcName       string
 	SrcTenant     string
 	SrcPrivateIP  string
@@ -56,7 +58,7 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 	query := `
 		SELECT COALESCE(f.agent_id, ''), COALESCE(f.src_vm_id, ''), COALESCE(f.dst_vm_id, ''),
 		       host(f.src_ip), host(f.dst_ip), COALESCE(f.dst_port, 0), f.protocol, f.scope,
-		       f.bytes_sent, f.bytes_received, f.packets, f.connection_count, f.first_seen, f.last_seen,
+		       f.bytes_sent, f.bytes_received, f.packets, f.connection_count, f.first_seen, f.last_seen, f.observed_at,
 		       COALESCE(sv.name, ''), COALESCE(sv.tenant_id, ''), COALESCE(host(sv.private_ip), ''),
 		       COALESCE(sv.status, ''), COALESCE(sv.role, ''), COALESCE(sv.agent_id, ''),
 		       COALESCE(dv.name, ''), COALESCE(dv.tenant_id, ''), COALESCE(host(dv.private_ip), ''),
@@ -108,7 +110,7 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 		if err := rows.Scan(
 			&row.AgentID, &row.SrcVMID, &row.DstVMID, &row.SrcIP, &row.DstIP,
 			&row.DstPort, &row.Protocol, &row.Scope, &row.BytesSent, &row.BytesReceived,
-			&row.Packets, &row.Connections, &row.FirstSeen, &row.LastSeen,
+			&row.Packets, &row.Connections, &row.FirstSeen, &row.LastSeen, &row.ObservedAt,
 			&row.SrcName, &row.SrcTenant, &row.SrcPrivateIP, &row.SrcStatus, &row.SrcRole, &row.SrcAgentID,
 			&row.DstName, &row.DstTenant, &row.DstPrivateIP, &row.DstStatus, &row.DstRole, &row.DstAgentID,
 		); err != nil {
@@ -211,6 +213,9 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 		if row.LastSeen.After(edge.LastSeen) {
 			edge.LastSeen = row.LastSeen
 		}
+		if row.ObservedAt.After(edge.LastObservedAt) {
+			edge.LastObservedAt = row.ObservedAt
+		}
 		edge.Weight = edgeWeight(edge.BytesSent + edge.BytesReceived)
 
 		nodes[sourceID].TrafficOut += row.BytesSent
@@ -224,11 +229,17 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 		result.Nodes = append(result.Nodes, *node)
 	}
 	for _, edge := range edges {
+		setEdgeActivity(edge, now, edge.LastObservedAt, s.flowActiveWindow)
 		result.Edges = append(result.Edges, *edge)
 	}
 	sort.Slice(result.Nodes, func(i, j int) bool { return result.Nodes[i].ID < result.Nodes[j].ID })
 	sort.Slice(result.Edges, func(i, j int) bool { return result.Edges[i].ID < result.Edges[j].ID })
 	return result, nil
+}
+
+func setEdgeActivity(edge *model.GraphEdge, now, observedAt time.Time, activeWindow time.Duration) {
+	edge.ActiveUntil = observedAt.Add(activeWindow)
+	edge.Active = now.Before(edge.ActiveUntil)
 }
 
 func visibleVM(vm model.VM, requestedStatus string, _ time.Time) bool {

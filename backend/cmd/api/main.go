@@ -44,7 +44,7 @@ func run() error {
 	agents := service.NewAgentService(pool, hub)
 	vms := service.NewVMService(pool)
 	flows := service.NewFlowService(pool, classifier, hub)
-	graph := service.NewGraphService(pool, vms)
+	graph := service.NewGraphService(pool, vms, cfg.FlowActiveWindow)
 	stats := service.NewStatsService(pool)
 	handlers := &apihttp.Handlers{Pool: pool, Agents: agents, VMs: vms, Flows: flows, Graph: graph, Stats: stats}
 

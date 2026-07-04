@@ -32,6 +32,9 @@ type GraphEdge struct {
 	ConnectionCount int64     `json:"connection_count"`
 	FirstSeen       time.Time `json:"first_seen"`
 	LastSeen        time.Time `json:"last_seen"`
+	LastObservedAt  time.Time `json:"last_observed_at"`
+	Active          bool      `json:"active"`
+	ActiveUntil     time.Time `json:"active_until"`
 	Weight          int       `json:"weight"`
 }
 

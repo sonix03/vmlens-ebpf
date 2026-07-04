@@ -12,6 +12,7 @@ type Config struct {
 	DatabaseURL       string
 	InternalCIDRs     []string
 	AllowedOrigins    []string
+	FlowActiveWindow  time.Duration
 	StatusSweepPeriod time.Duration
 	VMDeleteAfter     time.Duration
 }
@@ -22,8 +23,16 @@ func Load() (Config, error) {
 		DatabaseURL:       env("DATABASE_URL", "postgres://vmlens:vmlens@localhost:5432/vmlens?sslmode=disable"),
 		InternalCIDRs:     csv(env("INTERNAL_CIDRS", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8")),
 		AllowedOrigins:    csv(env("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")),
+		FlowActiveWindow:  3 * time.Second,
 		StatusSweepPeriod: 30 * time.Second,
 		VMDeleteAfter:     0,
+	}
+	if raw := os.Getenv("FLOW_ACTIVE_WINDOW"); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse FLOW_ACTIVE_WINDOW: %w", err)
+		}
+		cfg.FlowActiveWindow = d
 	}
 	if raw := os.Getenv("STATUS_SWEEP_PERIOD"); raw != "" {
 		d, err := time.ParseDuration(raw)
@@ -41,6 +50,9 @@ func Load() (Config, error) {
 	}
 	if cfg.VMDeleteAfter < 0 || (cfg.VMDeleteAfter > 0 && cfg.VMDeleteAfter <= 5*time.Minute) {
 		return Config{}, fmt.Errorf("VM_DELETE_AFTER must be 0 (disabled) or greater than 5 minutes")
+	}
+	if cfg.FlowActiveWindow < 500*time.Millisecond || cfg.FlowActiveWindow > time.Minute {
+		return Config{}, fmt.Errorf("FLOW_ACTIVE_WINDOW must be between 500ms and 1m")
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("DATABASE_URL is required")
