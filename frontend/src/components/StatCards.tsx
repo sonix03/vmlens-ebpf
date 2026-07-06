@@ -10,9 +10,8 @@ export function formatBytes(bytes: number): string {
 export function StatCards({ summary }: { summary?: Summary }) {
   const cards = [
     ['VMs', summary?.total_vms ?? 0, `${summary?.online_vms ?? 0} online`],
-    ['Relationships', summary?.total_flows ?? 0, 'aggregated edges'],
-    ['Internal', formatBytes(summary?.internal_bytes ?? 0), 'registered traffic'],
-    ['External', formatBytes(summary?.external_bytes ?? 0), 'public destinations'],
+    ['Internal VM traffic', formatBytes(summary?.internal_bytes ?? 0), `↑ ${formatBytes(summary?.internal_sent_bytes ?? 0)} · ↓ ${formatBytes(summary?.internal_received_bytes ?? 0)}`],
+    ['External traffic', formatBytes(summary?.external_bytes ?? 0), `↑ ${formatBytes(summary?.external_sent_bytes ?? 0)} · ↓ ${formatBytes(summary?.external_received_bytes ?? 0)}`],
     ['Unknown internal', summary?.unknown_internal_hosts ?? 0, 'awaiting agent'],
   ]
   return <section className="stat-grid">
@@ -21,4 +20,3 @@ export function StatCards({ summary }: { summary?: Summary }) {
     </article>)}
   </section>
 }
-

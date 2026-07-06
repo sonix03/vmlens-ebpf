@@ -12,7 +12,7 @@ interface Props {
 }
 
 const statusColors: Record<string, string> = {
-  online: '#32ff75', stale: '#f59e0b', offline: '#64748b', unknown: '#94a3b8',
+  online: '#55a979', stale: '#c5964b', offline: '#6b7280', unknown: '#8b949e',
 }
 
 function positionFor(index: number, count: number) {
@@ -30,8 +30,8 @@ export function GraphView({ graph, onNodeSelect }: Props) {
     return () => window.clearInterval(interval)
   }, [])
 
-  // Only registered VMs belong on the main topology. Destination IPs and other
-  // metadata remain available from the backend without becoming graph nodes.
+  // The main topology is VM-only. Unknown/private and public endpoints remain
+  // available through the API without becoming graph nodes.
   const vmNodes = useMemo(() => graph.nodes.filter((node) => node.type === 'vm'), [graph.nodes])
   const vmIDs = useMemo(() => new Set(vmNodes.map((node) => node.id)), [vmNodes])
 
@@ -45,11 +45,11 @@ export function GraphView({ graph, onNodeSelect }: Props) {
         label: <div className="node-label"><i style={{ background: color }} /><strong>{node.label}</strong></div>,
       },
       style: {
-        background: '#101927', border: online ? `2px solid ${color}` : `1px solid ${color}66`, color: '#e5edf7',
-        borderRadius: 12, minWidth: 170,
-        boxShadow: online ? `0 0 14px ${color}cc, 0 0 34px ${color}66` : '0 12px 35px #0008',
-        opacity: online ? 1 : 0.62,
-        padding: '14px 16px',
+        background: '#151a20', border: `1px solid ${online ? color : `${color}66`}`, color: '#e5e7eb',
+        borderRadius: 5, minWidth: 168,
+        boxShadow: 'none',
+        opacity: online ? 1 : 0.58,
+        padding: '12px 14px',
       },
     }
   }), [vmNodes])
@@ -75,7 +75,7 @@ export function GraphView({ graph, onNodeSelect }: Props) {
 
     return Array.from(relationships.entries()).map(([id, relationship]) => {
       const active = relationship.activeUntil > clock
-      const color = active ? '#5eead4' : '#475569'
+      const color = active ? '#6fa88b' : '#4a515a'
       return {
         id,
         source: relationship.source,
@@ -109,7 +109,7 @@ export function GraphView({ graph, onNodeSelect }: Props) {
         if (original) onNodeSelect(original)
       }}
     >
-      <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#26354a" />
+      <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#2b3138" />
       <Controls position="bottom-left" />
     </ReactFlow>
   </div>
