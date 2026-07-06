@@ -11,3 +11,5 @@
 - [08-postgresql.md](08-postgresql.md)
 - [09-redis.md](09-redis.md)
 - [10-realtime-check.md](10-realtime-check.md)
+- [11-external-git-clone.md](11-external-git-clone.md)
+- [12-external-known-bytes.md](12-external-known-bytes.md)

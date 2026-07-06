@@ -58,6 +58,11 @@ func run() error {
 	}
 	defer source.Close()
 	events, collectorErrors := source.Run(ctx)
+	flowTicker := time.NewTicker(cfg.FlowInterval)
+	defer flowTicker.Stop()
+	pendingFlows := newFlowAccumulator()
+	flowBatches := make(chan []model.FlowEvent, 32)
+	go runFlowSender(ctx, client, flowBatches)
 	for events != nil || collectorErrors != nil {
 		select {
 		case <-ctx.Done():
@@ -73,8 +78,19 @@ func run() error {
 			if ignoreFlow(controlPlane, event.DstIP) {
 				continue
 			}
-			if err := sendFlow(ctx, client, event); err != nil {
-				log.Printf("send flow: %v", err)
+			pendingFlows.Add(event)
+		case <-flowTicker.C:
+			batch := pendingFlows.Drain()
+			if len(batch) == 0 {
+				continue
+			}
+			select {
+			case flowBatches <- batch:
+			default:
+				// Preserve counters during a temporary backend/tunnel slowdown. The
+				// next interval will retry the merged flow instead of dropping bytes.
+				pendingFlows.AddAll(batch)
+				log.Printf("flow sender backlog full; retaining %d aggregated flows", len(batch))
 			}
 		case err, ok := <-collectorErrors:
 			if !ok {
@@ -87,6 +103,81 @@ func run() error {
 		}
 	}
 	return nil
+}
+
+type flowKey struct {
+	agentID   string
+	srcIP     string
+	dstIP     string
+	dstPort   int
+	protocol  string
+	direction string
+	iface     string
+}
+
+type flowAccumulator struct {
+	flows map[flowKey]model.FlowEvent
+}
+
+func newFlowAccumulator() *flowAccumulator {
+	return &flowAccumulator{flows: make(map[flowKey]model.FlowEvent)}
+}
+
+func (a *flowAccumulator) Add(event model.FlowEvent) {
+	key := flowKey{
+		agentID: event.AgentID, srcIP: event.SrcIP, dstIP: event.DstIP,
+		dstPort: event.DstPort, protocol: event.Protocol, direction: event.Direction,
+		iface: event.Interface,
+	}
+	current, exists := a.flows[key]
+	if !exists {
+		a.flows[key] = event
+		return
+	}
+	current.BytesSent += event.BytesSent
+	current.BytesReceived += event.BytesReceived
+	current.Packets += event.Packets
+	current.ConnectionCount += event.ConnectionCount
+	if current.FirstSeen.IsZero() || (!event.FirstSeen.IsZero() && event.FirstSeen.Before(current.FirstSeen)) {
+		current.FirstSeen = event.FirstSeen
+	}
+	if event.LastSeen.After(current.LastSeen) {
+		current.LastSeen = event.LastSeen
+	}
+	a.flows[key] = current
+}
+
+func (a *flowAccumulator) AddAll(events []model.FlowEvent) {
+	for _, event := range events {
+		a.Add(event)
+	}
+}
+
+func (a *flowAccumulator) Drain() []model.FlowEvent {
+	if len(a.flows) == 0 {
+		return nil
+	}
+	events := make([]model.FlowEvent, 0, len(a.flows))
+	for _, event := range a.flows {
+		events = append(events, event)
+	}
+	a.flows = make(map[flowKey]model.FlowEvent)
+	return events
+}
+
+func runFlowSender(ctx context.Context, client *sender.Sender, batches <-chan []model.FlowEvent) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case batch := <-batches:
+			for _, event := range batch {
+				if err := sendFlow(ctx, client, event); err != nil {
+					log.Printf("send aggregated flow: %v", err)
+				}
+			}
+		}
+	}
 }
 
 type endpointFilter struct{ addresses map[string]struct{} }

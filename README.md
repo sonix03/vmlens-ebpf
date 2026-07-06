@@ -74,6 +74,11 @@ The graph starts empty by design. Install the script on a real VM; that VM
 registers itself and appears as a node without a page refresh. Relationships
 appear when the real collector sends flows.
 
+The dashboard applies `flow.updated` SSE events directly for immediate active
+line feedback, then performs a throttled canonical refresh for counters. Traffic
+cards split cumulative internal VM bytes from external public bytes, including
+sent/received and aggregated-flow counts.
+
 Useful commands:
 
 ```bash
