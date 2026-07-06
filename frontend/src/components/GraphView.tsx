@@ -15,6 +15,27 @@ const statusColors: Record<string, string> = {
   online: '#55a979', stale: '#c5964b', offline: '#6b7280', unknown: '#8b949e',
 }
 
+function VMIcon() {
+  return <span className="vm-node-icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="none">
+      <rect x="4.25" y="4.25" width="15.5" height="6.5" rx="2" />
+      <rect x="4.25" y="13.25" width="15.5" height="6.5" rx="2" />
+      <path d="M8 7.5h.01M8 16.5h.01M11 7.5h5M11 16.5h5" />
+    </svg>
+  </span>
+}
+
+function NodeStatusIcon({ status }: { status: string }) {
+  if (status === 'online') {
+    return <span className="vm-node-status" aria-label="online">
+      <svg viewBox="0 0 17 17" width="17" height="17" fill="none" aria-hidden="true">
+        <path d="M14.063 4.5 6.73 11.833 3.396 8.5" />
+      </svg>
+    </span>
+  }
+  return <span className="vm-node-status-dot" aria-label={status} />
+}
+
 function positionFor(index: number, count: number) {
   if (count === 1) return { x: 0, y: 0 }
   const angle = (index / count) * Math.PI * 2 - Math.PI / 2
@@ -36,20 +57,30 @@ export function GraphView({ graph, onNodeSelect }: Props) {
   const vmIDs = useMemo(() => new Set(vmNodes.map((node) => node.id)), [vmNodes])
 
   const nodes = useMemo<Node[]>(() => vmNodes.map((node, index) => {
-    const color = statusColors[node.status || 'unknown'] || statusColors.unknown
+    const status = node.status || 'unknown'
+    const color = statusColors[status] || statusColors.unknown
     const online = node.status === 'online'
     return {
       id: node.id,
       position: positionFor(index, vmNodes.length),
+      className: `vm-node vm-node-${status}`,
       data: {
-        label: <div className="node-label"><i style={{ background: color }} /><strong>{node.label}</strong></div>,
+        label: <div
+          data-testid={`node-${node.id}`}
+          className="vm-node-content"
+          title={`${node.label} · ${node.ip || 'no IP'} · ${status}`}
+        >
+          <VMIcon />
+          <strong>{node.label}</strong>
+          <NodeStatusIcon status={status} />
+        </div>,
       },
       style: {
-        background: '#151a20', border: `1px solid ${online ? color : `${color}66`}`, color: '#e5e7eb',
-        borderRadius: 5, minWidth: 168,
+        background: '#252a30', border: `1px solid ${online ? color : `${color}80`}`, color: '#f1f3f5',
+        borderRadius: 999, minWidth: 210,
         boxShadow: 'none',
-        opacity: online ? 1 : 0.58,
-        padding: '12px 14px',
+        opacity: online ? 1 : 0.68,
+        padding: '12px 24px',
       },
     }
   }), [vmNodes])

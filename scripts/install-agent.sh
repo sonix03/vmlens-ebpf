@@ -79,5 +79,6 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now vmlens-agent
+systemctl enable vmlens-agent
+systemctl restart vmlens-agent
 echo "VMLens agent installed; logs: journalctl -u vmlens-agent -f"
