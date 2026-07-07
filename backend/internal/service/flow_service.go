@@ -77,7 +77,7 @@ func (s *FlowService) Ingest(ctx context.Context, event model.FlowEvent) (model.
 
 	// Serialize a single aggregate key. This avoids duplicate graph edges under
 	// concurrent ingestion without depending on NULL equality in a unique index.
-	lockKey := fmt.Sprintf("%s|%s|%s|%s|%d|%s", source.ID, valueOr(event.SrcIP, source.ID), valueOr(destination.ID, event.DstIP), event.Protocol, event.DstPort, scope)
+	lockKey := fmt.Sprintf("%s|%s|%s|%s|%s|%d|%s", source.ID, valueOr(event.SrcIP, source.ID), valueOr(destination.ID, event.DstIP), event.Protocol, event.Direction, event.DstPort, scope)
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
 		return model.Flow{}, err
 	}
@@ -88,8 +88,8 @@ func (s *FlowService) Ingest(ctx context.Context, event model.FlowEvent) (model.
 		WHERE src_vm_id IS NOT DISTINCT FROM $1
 		  AND dst_vm_id IS NOT DISTINCT FROM $2
 		  AND src_ip = $3::inet AND dst_ip = $4::inet
-		  AND protocol = $5 AND dst_port = $6 AND scope = $7
-		LIMIT 1 FOR UPDATE`, source.ID, destinationID, event.SrcIP, event.DstIP, event.Protocol, event.DstPort, scope).Scan(&flowID)
+		  AND protocol = $5 AND dst_port = $6 AND scope = $7 AND direction = $8
+		LIMIT 1 FOR UPDATE`, source.ID, destinationID, event.SrcIP, event.DstIP, event.Protocol, event.DstPort, scope, event.Direction).Scan(&flowID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return model.Flow{}, err
 	}
@@ -99,11 +99,11 @@ func (s *FlowService) Ingest(ctx context.Context, event model.FlowEvent) (model.
 			INSERT INTO network_flows (
 				agent_id, src_vm_id, dst_vm_id, src_ip, dst_ip, src_port, dst_port,
 				protocol, direction, scope, bytes_sent, bytes_received, packets, connection_count,
-				first_seen, last_seen, interface_name
-			) VALUES ($1, $2, $3, $4::inet, $5::inet, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+				request_count, first_seen, last_seen, interface_name
+			) VALUES ($1, $2, $3, $4::inet, $5::inet, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 			RETURNING id::text`, event.AgentID, source.ID, destinationID, event.SrcIP, event.DstIP,
 			event.SrcPort, event.DstPort, event.Protocol, event.Direction, scope, event.BytesSent, event.BytesReceived,
-			event.Packets, event.ConnectionCount, event.FirstSeen, event.LastSeen, nullIfEmpty(event.Interface)).Scan(&flowID)
+			event.Packets, event.ConnectionCount, event.RequestCount, event.FirstSeen, event.LastSeen, nullIfEmpty(event.Interface)).Scan(&flowID)
 	} else {
 		_, err = tx.Exec(ctx, `
 			UPDATE network_flows SET
@@ -111,16 +111,29 @@ func (s *FlowService) Ingest(ctx context.Context, event model.FlowEvent) (model.
 				bytes_received = bytes_received + $3,
 				packets = packets + $4,
 				connection_count = connection_count + $5,
-				first_seen = LEAST(first_seen, $6),
-				last_seen = GREATEST(last_seen, $7),
-				agent_id = $8,
-				interface_name = COALESCE($9, interface_name),
+				request_count = request_count + $6,
+				first_seen = LEAST(first_seen, $7),
+				last_seen = GREATEST(last_seen, $8),
+				agent_id = $9,
+				interface_name = COALESCE($10, interface_name),
 				observed_at = NOW()
 			WHERE id = $1::uuid`, flowID, event.BytesSent, event.BytesReceived, event.Packets,
-			event.ConnectionCount, event.FirstSeen, event.LastSeen, event.AgentID, nullIfEmpty(event.Interface))
+			event.ConnectionCount, event.RequestCount, event.FirstSeen, event.LastSeen, event.AgentID, nullIfEmpty(event.Interface))
 	}
 	if err != nil {
 		return model.Flow{}, fmt.Errorf("aggregate flow: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO flow_observations (
+			flow_id, agent_id, src_vm_id, dst_vm_id, src_ip, dst_ip, src_port, dst_port,
+			protocol, direction, scope, bytes_sent, bytes_received, packets, connection_count,
+			request_count, first_seen, last_seen
+		) VALUES ($1::uuid, $2, $3, $4, $5::inet, $6::inet, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+		flowID, event.AgentID, source.ID, destinationID, event.SrcIP, event.DstIP,
+		event.SrcPort, event.DstPort, event.Protocol, event.Direction, scope,
+		event.BytesSent, event.BytesReceived, event.Packets, event.ConnectionCount,
+		event.RequestCount, event.FirstSeen, event.LastSeen); err != nil {
+		return model.Flow{}, fmt.Errorf("record flow observation: %w", err)
 	}
 
 	if _, err := tx.Exec(ctx, `UPDATE agents SET last_seen = NOW(), status = 'online' WHERE id = $1`, event.AgentID); err != nil {
@@ -133,13 +146,17 @@ func (s *FlowService) Ingest(ctx context.Context, event model.FlowEvent) (model.
 		return model.Flow{}, err
 	}
 
+	serviceName, servicePort := classifyService(event.Protocol, event.Direction, event.SrcPort, event.DstPort)
 	flow := model.Flow{
 		ID: flowID, AgentID: event.AgentID, SrcVMID: source.ID, SrcIP: event.SrcIP,
 		DstIP: event.DstIP, SrcPort: event.SrcPort, DstPort: event.DstPort,
-		Protocol: event.Protocol, Direction: event.Direction, Scope: scope, BytesSent: event.BytesSent,
+		Protocol: event.Protocol, Direction: event.Direction, Scope: scope, Service: serviceName, ServicePort: servicePort, BytesSent: event.BytesSent,
 		BytesReceived: event.BytesReceived, Packets: event.Packets,
-		ConnectionCount: event.ConnectionCount, FirstSeen: event.FirstSeen,
-		LastSeen: event.LastSeen, InterfaceName: event.Interface,
+		ConnectionCount: event.ConnectionCount, RequestCount: event.RequestCount,
+		RequestsPerSec:    ratePerSecond(event.RequestCount, event.FirstSeen, event.LastSeen),
+		ConnectionsPerSec: ratePerSecond(event.ConnectionCount, event.FirstSeen, event.LastSeen),
+		FirstSeen:         event.FirstSeen,
+		LastSeen:          event.LastSeen, ObservedAt: time.Now().UTC(), InterfaceName: event.Interface,
 	}
 	if destinationRegistered {
 		flow.DstVMID = destination.ID
@@ -156,7 +173,7 @@ func (s *FlowService) List(ctx context.Context, limit int) ([]model.Flow, error)
 		SELECT id::text, COALESCE(agent_id, ''), COALESCE(src_vm_id, ''), COALESCE(dst_vm_id, ''),
 		       host(src_ip), host(dst_ip), COALESCE(src_port, 0), COALESCE(dst_port, 0),
 		       protocol, direction, scope, bytes_sent, bytes_received, packets, connection_count,
-		       first_seen, last_seen, COALESCE(interface_name, ''), created_at
+		       request_count, first_seen, last_seen, observed_at, COALESCE(interface_name, ''), created_at
 		FROM network_flows ORDER BY last_seen DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -167,12 +184,63 @@ func (s *FlowService) List(ctx context.Context, limit int) ([]model.Flow, error)
 		var flow model.Flow
 		if err := rows.Scan(&flow.ID, &flow.AgentID, &flow.SrcVMID, &flow.DstVMID, &flow.SrcIP, &flow.DstIP,
 			&flow.SrcPort, &flow.DstPort, &flow.Protocol, &flow.Direction, &flow.Scope, &flow.BytesSent, &flow.BytesReceived,
-			&flow.Packets, &flow.ConnectionCount, &flow.FirstSeen, &flow.LastSeen, &flow.InterfaceName, &flow.CreatedAt); err != nil {
+			&flow.Packets, &flow.ConnectionCount, &flow.RequestCount, &flow.FirstSeen, &flow.LastSeen, &flow.ObservedAt, &flow.InterfaceName, &flow.CreatedAt); err != nil {
 			return nil, err
 		}
+		flow.Service, flow.ServicePort = classifyService(flow.Protocol, flow.Direction, flow.SrcPort, flow.DstPort)
+		flow.RequestsPerSec = ratePerSecond(flow.RequestCount, flow.FirstSeen, flow.LastSeen)
+		flow.ConnectionsPerSec = ratePerSecond(flow.ConnectionCount, flow.FirstSeen, flow.LastSeen)
 		flows = append(flows, flow)
 	}
 	return flows, rows.Err()
+}
+
+func (s *FlowService) ListInternalActivity(ctx context.Context, limit int) ([]model.InternalActivity, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT f.id::text, COALESCE(f.src_vm_id, ''), COALESCE(observer.name, ''), host(f.src_ip),
+		       COALESCE(f.dst_vm_id, ''), COALESCE(peer.name, ''), host(f.dst_ip),
+		       COALESCE(f.src_port, 0), COALESCE(f.dst_port, 0), f.protocol, f.direction, f.scope,
+		       f.bytes_sent, f.bytes_received, f.connection_count, f.request_count, f.first_seen, f.last_seen, f.observed_at
+		FROM network_flows f
+		LEFT JOIN vms observer ON observer.id = f.src_vm_id
+		LEFT JOIN vms peer ON peer.id = f.dst_vm_id
+		WHERE f.scope IN ('internal_same_tenant', 'internal_cross_tenant', 'unknown_internal')
+		ORDER BY f.observed_at DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]model.InternalActivity, 0, limit)
+	for rows.Next() {
+		var activity model.InternalActivity
+		if err := rows.Scan(
+			&activity.ID, &activity.ObserverVMID, &activity.ObserverName, &activity.ObserverIP,
+			&activity.PeerVMID, &activity.PeerName, &activity.PeerIP,
+			&activity.LocalPort, &activity.PeerPort, &activity.Protocol, &activity.Direction, &activity.Scope,
+			&activity.BytesSent, &activity.BytesReceived, &activity.ConnectionCount, &activity.RequestCount,
+			&activity.FirstSeen, &activity.LastSeen, &activity.ObservedAt,
+		); err != nil {
+			return nil, err
+		}
+		activity.Service, activity.ServicePort = classifyService(activity.Protocol, activity.Direction, activity.LocalPort, activity.PeerPort)
+		activity.RequestsPerSec = ratePerSecond(activity.RequestCount, activity.FirstSeen, activity.LastSeen)
+		activity.ConnectionsPerSec = ratePerSecond(activity.ConnectionCount, activity.FirstSeen, activity.LastSeen)
+		activity.ObserverName = valueOr(activity.ObserverName, activity.ObserverIP)
+		activity.PeerName = valueOr(activity.PeerName, activity.PeerIP)
+		if activity.Direction == "ingress" {
+			activity.SourceVMID, activity.SourceName, activity.SourceIP = activity.PeerVMID, activity.PeerName, activity.PeerIP
+			activity.DestinationVMID, activity.DestinationName, activity.DestinationIP = activity.ObserverVMID, activity.ObserverName, activity.ObserverIP
+		} else {
+			activity.SourceVMID, activity.SourceName, activity.SourceIP = activity.ObserverVMID, activity.ObserverName, activity.ObserverIP
+			activity.DestinationVMID, activity.DestinationName, activity.DestinationIP = activity.PeerVMID, activity.PeerName, activity.PeerIP
+		}
+		result = append(result, activity)
+	}
+	return result, rows.Err()
 }
 
 func validateFlow(event *model.FlowEvent) error {
@@ -200,7 +268,7 @@ func validateFlow(event *model.FlowEvent) error {
 	if event.SrcPort < 0 || event.SrcPort > 65535 || event.DstPort < 0 || event.DstPort > 65535 {
 		return fmt.Errorf("ports must be between 0 and 65535")
 	}
-	if event.BytesSent < 0 || event.BytesReceived < 0 || event.Packets < 0 || event.ConnectionCount < 0 {
+	if event.BytesSent < 0 || event.BytesReceived < 0 || event.Packets < 0 || event.ConnectionCount < 0 || event.RequestCount < 0 {
 		return fmt.Errorf("flow counters cannot be negative")
 	}
 	now := time.Now().UTC()
@@ -213,6 +281,9 @@ func validateFlow(event *model.FlowEvent) error {
 	if event.LastSeen.Before(event.FirstSeen) {
 		return fmt.Errorf("last_seen cannot be before first_seen")
 	}
+	if event.RequestCount == 0 {
+		event.RequestCount = inferRequestCount(*event)
+	}
 	return nil
 }
 
@@ -221,4 +292,34 @@ func valueOr(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func inferRequestCount(event model.FlowEvent) int64 {
+	if event.ConnectionCount > 0 {
+		return event.ConnectionCount
+	}
+	if event.Protocol == "udp" {
+		switch event.Direction {
+		case "egress":
+			if event.BytesSent > 0 {
+				return 1
+			}
+		case "ingress":
+			if event.BytesReceived > 0 {
+				return 1
+			}
+		}
+	}
+	return 0
+}
+
+func ratePerSecond(count int64, firstSeen, lastSeen time.Time) float64 {
+	if count <= 0 {
+		return 0
+	}
+	seconds := lastSeen.Sub(firstSeen).Seconds()
+	if seconds < 1 {
+		seconds = 1
+	}
+	return float64(count) / seconds
 }

@@ -34,6 +34,7 @@ type graphFlowRow struct {
 	BytesReceived int64
 	Packets       int64
 	Connections   int64
+	Requests      int64
 	FirstSeen     time.Time
 	LastSeen      time.Time
 	ObservedAt    time.Time
@@ -58,7 +59,7 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 	query := `
 		SELECT COALESCE(f.agent_id, ''), COALESCE(f.src_vm_id, ''), COALESCE(f.dst_vm_id, ''),
 		       host(f.src_ip), host(f.dst_ip), COALESCE(f.dst_port, 0), f.protocol, f.scope,
-		       f.bytes_sent, f.bytes_received, f.packets, f.connection_count, f.first_seen, f.last_seen, f.observed_at,
+		       f.bytes_sent, f.bytes_received, f.packets, f.connection_count, f.request_count, f.first_seen, f.last_seen, f.observed_at,
 		       COALESCE(sv.name, ''), COALESCE(sv.tenant_id, ''), COALESCE(host(sv.private_ip), ''),
 		       COALESCE(sv.status, ''), COALESCE(sv.role, ''), COALESCE(sv.agent_id, ''),
 		       COALESCE(dv.name, ''), COALESCE(dv.tenant_id, ''), COALESCE(host(dv.private_ip), ''),
@@ -110,7 +111,7 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 		if err := rows.Scan(
 			&row.AgentID, &row.SrcVMID, &row.DstVMID, &row.SrcIP, &row.DstIP,
 			&row.DstPort, &row.Protocol, &row.Scope, &row.BytesSent, &row.BytesReceived,
-			&row.Packets, &row.Connections, &row.FirstSeen, &row.LastSeen, &row.ObservedAt,
+			&row.Packets, &row.Connections, &row.Requests, &row.FirstSeen, &row.LastSeen, &row.ObservedAt,
 			&row.SrcName, &row.SrcTenant, &row.SrcPrivateIP, &row.SrcStatus, &row.SrcRole, &row.SrcAgentID,
 			&row.DstName, &row.DstTenant, &row.DstPrivateIP, &row.DstStatus, &row.DstRole, &row.DstAgentID,
 		); err != nil {
@@ -207,6 +208,7 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 		edge.BytesReceived += row.BytesReceived
 		edge.Packets += row.Packets
 		edge.ConnectionCount += row.Connections
+		edge.RequestCount += row.Requests
 		if row.FirstSeen.Before(edge.FirstSeen) {
 			edge.FirstSeen = row.FirstSeen
 		}

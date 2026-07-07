@@ -21,19 +21,24 @@ func (s *StatsService) Summary(ctx context.Context) (model.Summary, error) {
 			(SELECT COUNT(*) FROM vms WHERE status = 'stale'),
 			(SELECT COUNT(*) FROM vms WHERE status = 'offline'),
 			(SELECT COUNT(*) FROM network_flows),
-			(SELECT COUNT(*) FROM network_flows WHERE scope IN ('internal_same_tenant', 'internal_cross_tenant')),
+			(SELECT COUNT(*) FROM network_flows WHERE scope IN ('internal_same_tenant', 'internal_cross_tenant', 'unknown_internal')),
 			(SELECT COUNT(*) FROM network_flows WHERE scope = 'external_public'),
-			COALESCE((SELECT SUM(bytes_sent + bytes_received) FROM network_flows WHERE scope IN ('internal_same_tenant', 'internal_cross_tenant')), 0),
-			COALESCE((SELECT SUM(bytes_sent) FROM network_flows WHERE scope IN ('internal_same_tenant', 'internal_cross_tenant')), 0),
-			COALESCE((SELECT SUM(bytes_received) FROM network_flows WHERE scope IN ('internal_same_tenant', 'internal_cross_tenant')), 0),
+			COALESCE((SELECT SUM(bytes_sent + bytes_received) FROM network_flows WHERE scope IN ('internal_same_tenant', 'internal_cross_tenant', 'unknown_internal')), 0),
+			COALESCE((SELECT SUM(bytes_sent) FROM network_flows WHERE scope IN ('internal_same_tenant', 'internal_cross_tenant', 'unknown_internal')), 0),
+			COALESCE((SELECT SUM(bytes_received) FROM network_flows WHERE scope IN ('internal_same_tenant', 'internal_cross_tenant', 'unknown_internal')), 0),
 			COALESCE((SELECT SUM(bytes_sent + bytes_received) FROM network_flows WHERE scope = 'external_public'), 0),
 			COALESCE((SELECT SUM(bytes_sent) FROM network_flows WHERE scope = 'external_public'), 0),
 			COALESCE((SELECT SUM(bytes_received) FROM network_flows WHERE scope = 'external_public'), 0),
-			(SELECT COUNT(*) FROM unknown_internal_hosts WHERE resolved_vm_id IS NULL)
+			(SELECT COUNT(*) FROM unknown_internal_hosts WHERE resolved_vm_id IS NULL),
+			COALESCE((SELECT SUM(request_count) FROM network_flows), 0),
+			COALESCE((SELECT SUM(request_count) FROM flow_observations WHERE observed_at >= NOW() - INTERVAL '60 seconds'), 0),
+			COALESCE((SELECT SUM(request_count)::double precision / 60 FROM flow_observations WHERE observed_at >= NOW() - INTERVAL '60 seconds'), 0),
+			COALESCE((SELECT SUM(connection_count)::double precision / 60 FROM flow_observations WHERE observed_at >= NOW() - INTERVAL '60 seconds'), 0)
 	`).Scan(&summary.TotalVMs, &summary.OnlineVMs, &summary.StaleVMs, &summary.OfflineVMs,
 		&summary.TotalFlows, &summary.InternalFlows, &summary.ExternalFlows,
 		&summary.InternalBytes, &summary.InternalSent, &summary.InternalRecv,
-		&summary.ExternalBytes, &summary.ExternalSent, &summary.ExternalRecv, &summary.UnknownInternal)
+		&summary.ExternalBytes, &summary.ExternalSent, &summary.ExternalRecv, &summary.UnknownInternal,
+		&summary.RequestTotal, &summary.RequestLastMinute, &summary.RequestsPerSec, &summary.ConnectionsPerSec)
 	summary.UpdatedAt = time.Now().UTC()
 	return summary, err
 }

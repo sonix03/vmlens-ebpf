@@ -30,6 +30,7 @@ type GraphEdge struct {
 	BytesReceived   int64     `json:"bytes_received"`
 	Packets         int64     `json:"packets"`
 	ConnectionCount int64     `json:"connection_count"`
+	RequestCount    int64     `json:"request_count"`
 	FirstSeen       time.Time `json:"first_seen"`
 	LastSeen        time.Time `json:"last_seen"`
 	LastObservedAt  time.Time `json:"last_observed_at"`

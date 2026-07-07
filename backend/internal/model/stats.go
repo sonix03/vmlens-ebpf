@@ -3,21 +3,25 @@ package model
 import "time"
 
 type Summary struct {
-	TotalVMs        int       `json:"total_vms"`
-	OnlineVMs       int       `json:"online_vms"`
-	StaleVMs        int       `json:"stale_vms"`
-	OfflineVMs      int       `json:"offline_vms"`
-	TotalFlows      int       `json:"total_flows"`
-	InternalFlows   int       `json:"internal_flows"`
-	ExternalFlows   int       `json:"external_flows"`
-	InternalBytes   int64     `json:"internal_bytes"`
-	InternalSent    int64     `json:"internal_sent_bytes"`
-	InternalRecv    int64     `json:"internal_received_bytes"`
-	ExternalBytes   int64     `json:"external_bytes"`
-	ExternalSent    int64     `json:"external_sent_bytes"`
-	ExternalRecv    int64     `json:"external_received_bytes"`
-	UnknownInternal int       `json:"unknown_internal_hosts"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	TotalVMs          int       `json:"total_vms"`
+	OnlineVMs         int       `json:"online_vms"`
+	StaleVMs          int       `json:"stale_vms"`
+	OfflineVMs        int       `json:"offline_vms"`
+	TotalFlows        int       `json:"total_flows"`
+	InternalFlows     int       `json:"internal_flows"`
+	ExternalFlows     int       `json:"external_flows"`
+	InternalBytes     int64     `json:"internal_bytes"`
+	InternalSent      int64     `json:"internal_sent_bytes"`
+	InternalRecv      int64     `json:"internal_received_bytes"`
+	ExternalBytes     int64     `json:"external_bytes"`
+	ExternalSent      int64     `json:"external_sent_bytes"`
+	ExternalRecv      int64     `json:"external_received_bytes"`
+	UnknownInternal   int       `json:"unknown_internal_hosts"`
+	RequestTotal      int64     `json:"network_requests_total"`
+	RequestLastMinute int64     `json:"network_requests_last_minute"`
+	RequestsPerSec    float64   `json:"network_requests_per_second"`
+	ConnectionsPerSec float64   `json:"network_connections_per_second"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type TopTalker struct {

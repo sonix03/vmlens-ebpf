@@ -14,6 +14,7 @@ func Routes(handlers *Handlers, hub *realtime.Hub, allowedOrigins []string) http
 	mux.HandleFunc("GET /api/agents", handlers.ListAgents)
 	mux.HandleFunc("GET /api/vms", handlers.ListVMs)
 	mux.HandleFunc("GET /api/flows", handlers.ListFlows)
+	mux.HandleFunc("GET /api/internal/activity", handlers.ListInternalActivity)
 	mux.HandleFunc("POST /api/flows/ingest", handlers.IngestFlow)
 	mux.HandleFunc("GET /api/graph", handlers.GetGraph)
 	mux.HandleFunc("GET /api/stats/summary", handlers.Summary)
