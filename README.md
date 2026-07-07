@@ -228,14 +228,18 @@ If an unknown internal node already exists for one of the new VM's IPs, the
 backend marks it resolved and rewrites matching relationships to the registered
 VM.
 
-### Heartbeat status
+### Agent and VM status
 
-- online: last heartbeat less than 60 seconds ago;
-- stale: last heartbeat between 1 and 5 minutes ago;
-- offline: no heartbeat for more than 5 minutes;
+- agent online: last registration or heartbeat less than 60 seconds ago;
+- agent stale: last heartbeat between 1 and 5 minutes ago;
+- agent offline: no heartbeat for more than 5 minutes;
+- VM online: last registration, heartbeat, or observed registered VM traffic
+  less than 60 seconds ago;
+- VM stale: last observed VM activity between 1 and 5 minutes ago;
+- VM offline: no observed VM activity for more than 5 minutes;
 - retained as an offline inventory node when heartbeats stop.
 
-The backend evaluates state every 10 seconds and emits an SSE update when state
+The backend evaluates state periodically and emits an SSE update when state
 changes. `VM_DELETE_AFTER=0` is the default, so offline nodes are retained.
 Heartbeat timeout is best-effort: without a cloud-provider deletion webhook the
 backend cannot distinguish a deleted VM from a long power/network outage. A

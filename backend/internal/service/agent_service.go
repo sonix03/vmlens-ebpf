@@ -189,10 +189,7 @@ func (s *AgentService) Heartbeat(ctx context.Context, heartbeat model.AgentHeart
 	if heartbeat.AgentID == "" {
 		return fmt.Errorf("agent_id is required")
 	}
-	seenAt := heartbeat.Timestamp
-	if seenAt.IsZero() || seenAt.After(time.Now().Add(time.Minute)) {
-		seenAt = time.Now().UTC()
-	}
+	seenAt := time.Now().UTC()
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE agents SET status = 'online', last_seen = $2 WHERE id = $1`, heartbeat.AgentID, seenAt)
 	if err != nil {
@@ -249,10 +246,14 @@ func (s *AgentService) UpdateStatuses(ctx context.Context) error {
 		return err
 	}
 	vmTag, err := tx.Exec(ctx, `
-		UPDATE vms v SET status = a.status, last_seen = a.last_seen
-		FROM agents a
-		WHERE v.agent_id = a.id
-		  AND (v.status IS DISTINCT FROM a.status OR v.last_seen IS DISTINCT FROM a.last_seen)`)
+		UPDATE vms SET status = CASE
+			WHEN last_seen >= NOW() - INTERVAL '1 minute' THEN 'online'
+			WHEN last_seen >= NOW() - INTERVAL '5 minutes' THEN 'stale'
+			ELSE 'offline' END
+		WHERE status IS DISTINCT FROM CASE
+			WHEN last_seen >= NOW() - INTERVAL '1 minute' THEN 'online'
+			WHEN last_seen >= NOW() - INTERVAL '5 minutes' THEN 'stale'
+			ELSE 'offline' END`)
 	if err != nil {
 		return err
 	}

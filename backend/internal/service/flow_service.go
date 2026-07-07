@@ -142,6 +142,11 @@ func (s *FlowService) Ingest(ctx context.Context, event model.FlowEvent) (model.
 	if _, err := tx.Exec(ctx, `UPDATE vms SET last_seen = NOW(), status = 'online' WHERE id = $1`, source.ID); err != nil {
 		return model.Flow{}, err
 	}
+	if destinationRegistered {
+		if _, err := tx.Exec(ctx, `UPDATE vms SET last_seen = NOW(), status = 'online' WHERE id = $1`, destination.ID); err != nil {
+			return model.Flow{}, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return model.Flow{}, err
 	}
@@ -200,14 +205,15 @@ func (s *FlowService) ListInternalActivity(ctx context.Context, limit int) ([]mo
 		limit = 100
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT f.id::text, COALESCE(f.src_vm_id, ''), COALESCE(observer.name, ''), host(f.src_ip),
-		       COALESCE(f.dst_vm_id, ''), COALESCE(peer.name, ''), host(f.dst_ip),
+		SELECT f.id::text, f.src_vm_id, COALESCE(observer.name, ''), host(f.src_ip),
+		       f.dst_vm_id, COALESCE(peer.name, ''), host(f.dst_ip),
 		       COALESCE(f.src_port, 0), COALESCE(f.dst_port, 0), f.protocol, f.direction, f.scope,
 		       f.bytes_sent, f.bytes_received, f.connection_count, f.request_count, f.first_seen, f.last_seen, f.observed_at
-		FROM network_flows f
-		LEFT JOIN vms observer ON observer.id = f.src_vm_id
-		LEFT JOIN vms peer ON peer.id = f.dst_vm_id
-		WHERE f.scope IN ('internal_same_tenant', 'internal_cross_tenant', 'unknown_internal')
+		FROM flow_observations f
+		JOIN vms observer ON observer.id = f.src_vm_id
+		JOIN vms peer ON peer.id = f.dst_vm_id
+		WHERE f.scope IN ('internal_same_tenant', 'internal_cross_tenant')
+		  AND (f.request_count > 0 OR f.connection_count > 0)
 		ORDER BY f.observed_at DESC
 		LIMIT $1`, limit)
 	if err != nil {
