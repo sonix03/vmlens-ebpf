@@ -12,3 +12,4 @@ agent/ebpf/vmlinux.h
 agent/ebpf/*.o
 SCRIPT.md
 INSTRUCTION.md
+SETUP.md

@@ -93,6 +93,13 @@ docker compose down -v   # also deletes local PostgreSQL test data
 Use this when the dashboard runs locally, while agents run on cloud VMs that are
 reachable over SSH.
 
+Tracking happens inside each cloud VM. The local machine only runs PostgreSQL,
+the backend API, and the frontend dashboard. Do not install the agent locally
+unless you also want to track the local machine as a VM node.
+
+For a copy-paste guide starting from a fresh clone, see
+[`instructions/15-from-scratch-local-dashboard-cloud-agent.md`](instructions/15-from-scratch-local-dashboard-cloud-agent.md).
+
 ### 1. Start the local dashboard
 
 ```bash
@@ -115,11 +122,15 @@ bash scripts/vmlens-tunnel.sh start <VM_A_PUBLIC_IP>
 bash scripts/vmlens-tunnel.sh start <VM_B_PUBLIC_IP>
 ```
 
-After this, each VM can reach the local backend through:
+After this, each cloud VM agent can send observations to the local backend
+through:
 
 ```text
 http://127.0.0.1:18080
 ```
+
+The tunnel is only a transport path from the cloud VM to the local backend. It
+does not track the local machine.
 
 Normal SSH access stays unchanged:
 

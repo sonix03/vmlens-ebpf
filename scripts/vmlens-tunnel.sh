@@ -36,6 +36,7 @@ ssh_common=(
   -o ExitOnForwardFailure=yes
   -o ServerAliveInterval=30
   -o ServerAliveCountMax=3
+  -o StrictHostKeyChecking=accept-new
   -S "${control_path}"
 )
 

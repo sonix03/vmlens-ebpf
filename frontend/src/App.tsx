@@ -123,18 +123,22 @@ export function App() {
   const refreshTimer = useRef<number>()
 
   const load = useCallback(async () => {
-    try {
-      const [nextGraph, nextSummary, nextActivity] = await Promise.all([
-        api.graph(graphWindow), api.summary(), api.internalActivity(),
-      ])
-      setGraph(nextGraph); setSummary(nextSummary); setInternalActivity(nextActivity); setError('')
-    } catch (reason) {
-      setGraph({ nodes: [], edges: [] })
-      setSummary(undefined)
-      setInternalActivity([])
-      setSelectedNode(undefined)
-      setError(reason instanceof Error ? reason.message : 'Unable to load network data')
-    } finally { setLoading(false) }
+    const [nextGraph, nextSummary, nextActivity] = await Promise.allSettled([
+      api.graph(graphWindow), api.summary(), api.internalActivity(),
+    ])
+    if (nextGraph.status === 'fulfilled') {
+      setGraph(nextGraph.value)
+      setError('')
+    } else {
+      setError(nextGraph.reason instanceof Error ? nextGraph.reason.message : 'Unable to load network graph')
+    }
+    if (nextSummary.status === 'fulfilled') {
+      setSummary(nextSummary.value)
+    }
+    if (nextActivity.status === 'fulfilled') {
+      setInternalActivity(nextActivity.value)
+    }
+    setLoading(false)
   }, [])
 
   useEffect(() => {

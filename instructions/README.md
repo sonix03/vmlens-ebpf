@@ -15,3 +15,6 @@
 - [12-external-known-bytes.md](12-external-known-bytes.md)
 - [13-request-frequency.md](13-request-frequency.md)
 - [14-cloud-vm-setup.md](14-cloud-vm-setup.md)
+- [15-from-scratch-local-dashboard-cloud-agent.md](15-from-scratch-local-dashboard-cloud-agent.md)
+- [16-clean-test-130-199-direct-backend.md](16-clean-test-130-199-direct-backend.md)
+- [17-windows-wsl-direct-backend-portproxy.md](17-windows-wsl-direct-backend-portproxy.md)
