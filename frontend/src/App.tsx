@@ -9,6 +9,7 @@ import type { Flow } from './types/flow'
 import type { GraphData, GraphEdge, GraphFilters, GraphNode } from './types/graph'
 import type { InternalActivity } from './types/internalActivity'
 import type { Summary } from './types/stats'
+import type { VM } from './types/vm'
 
 const graphWindow: GraphFilters = {
   vm_id: '', scope: '', protocol: '', port: '', time_range: '24h', min_bytes: '', status: '',
@@ -68,6 +69,61 @@ function edgeWeight(bytes: number): number {
   return 1
 }
 
+function vmToGraphNode(vm: VM): GraphNode {
+  return {
+    id: vm.id,
+    type: 'vm',
+    label: vm.name,
+    ip: vm.private_ip || vm.public_ip || vm.interfaces?.find((item) => item.ip_address)?.ip_address,
+    status: vm.status,
+    tenant_id: vm.tenant_id,
+    role: vm.role,
+    traffic_in: 0,
+    traffic_out: 0,
+  }
+}
+
+function mergeVMInventory(graph: GraphData, inventory: GraphNode[]): GraphData {
+  if (inventory.length === 0) return graph
+  const nodesByID = new Map(graph.nodes.map((node) => [node.id, node]))
+  inventory.forEach((vmNode) => {
+    const existing = nodesByID.get(vmNode.id)
+    if (existing) {
+      nodesByID.set(vmNode.id, {
+        ...vmNode,
+        ...existing,
+        label: existing.label || vmNode.label,
+        ip: existing.ip || vmNode.ip,
+        status: existing.status || vmNode.status,
+        tenant_id: existing.tenant_id || vmNode.tenant_id,
+        role: existing.role || vmNode.role,
+      })
+      return
+    }
+    nodesByID.set(vmNode.id, vmNode)
+  })
+
+  return {
+    ...graph,
+    nodes: Array.from(nodesByID.values()),
+  }
+}
+
+function mergeGraphData(current: GraphData, next: GraphData): GraphData {
+  const currentVMs = current.nodes.filter((node) => node.type === 'vm')
+  const nextVMs = next.nodes.filter((node) => node.type === 'vm')
+  if (currentVMs.length > 0 && nextVMs.length === 0) return current
+
+  const nextNodeIDs = new Set(next.nodes.map((node) => node.id))
+  const preservedVMs = currentVMs.filter((node) => !nextNodeIDs.has(node.id))
+  if (preservedVMs.length === 0) return next
+
+  return {
+    nodes: [...next.nodes, ...preservedVMs],
+    edges: next.edges,
+  }
+}
+
 function applyLiveFlow(graph: GraphData, flow: Flow, observedAt: string): GraphData {
   if (!flow.src_vm_id || !flow.dst_vm_id || flow.src_vm_id === flow.dst_vm_id) return graph
   const vmIDs = new Set(graph.nodes.filter((node) => node.type === 'vm').map((node) => node.id))
@@ -121,16 +177,23 @@ export function App() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const refreshTimer = useRef<number>()
+  const vmInventory = useRef<GraphNode[]>([])
 
   const load = useCallback(async () => {
-    const [nextGraph, nextSummary, nextActivity] = await Promise.allSettled([
-      api.graph(graphWindow), api.summary(), api.internalActivity(),
+    const [nextGraph, nextSummary, nextActivity, nextVMs] = await Promise.allSettled([
+      api.graph(graphWindow), api.summary(), api.internalActivity(), api.vms(),
     ])
+    if (nextVMs.status === 'fulfilled') {
+      vmInventory.current = nextVMs.value.map(vmToGraphNode)
+    }
     if (nextGraph.status === 'fulfilled') {
-      setGraph(nextGraph.value)
+      setGraph((current) => mergeVMInventory(mergeGraphData(current, nextGraph.value), vmInventory.current))
       setError('')
     } else {
       setError(nextGraph.reason instanceof Error ? nextGraph.reason.message : 'Unable to load network graph')
+      if (nextVMs.status === 'fulfilled') {
+        setGraph((current) => mergeVMInventory(current, vmInventory.current))
+      }
     }
     if (nextSummary.status === 'fulfilled') {
       setSummary(nextSummary.value)

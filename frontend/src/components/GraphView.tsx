@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
 import {
-  Background, BackgroundVariant, Controls, MarkerType, ReactFlow,
-  type Edge, type Node,
-} from '@xyflow/react'
-import '@xyflow/react/dist/style.css'
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type WheelEvent as ReactWheelEvent,
+} from 'react'
 import type { GraphData, GraphNode } from '../types/graph'
 
 interface Props {
@@ -13,6 +15,32 @@ interface Props {
 
 const statusColors: Record<string, string> = {
   online: '#55a979', stale: '#c5964b', offline: '#6b7280', unknown: '#8b949e',
+}
+const nodeWidth = 270
+const nodeHeight = 64
+const canvasPadding = 90
+const minCanvasWidth = 3200
+const minCanvasHeight = 2000
+const minZoom = 0.15
+const maxZoom = 2.5
+
+type Point = { x: number; y: number }
+type Viewport = Point & { zoom: number }
+
+function clampZoom(zoom: number) {
+  return Math.min(maxZoom, Math.max(minZoom, zoom))
+}
+
+function curvedPath(source: Point, target: Point) {
+  const dx = target.x - source.x
+  const dy = target.y - source.y
+  const length = Math.hypot(dx, dy) || 1
+  const curve = Math.min(40, Math.max(10, length * 0.04))
+  const mid = {
+    x: (source.x + target.x) / 2 - (dy / length) * curve,
+    y: (source.y + target.y) / 2 + (dx / length) * curve,
+  }
+  return `M ${source.x} ${source.y} Q ${mid.x} ${mid.y} ${target.x} ${target.y}`
 }
 
 function VMIcon() {
@@ -36,56 +64,124 @@ function NodeStatusIcon({ status }: { status: string }) {
   return <span className="vm-node-status-dot" aria-label={status} />
 }
 
-function positionFor(index: number, count: number) {
-  if (count === 1) return { x: 0, y: 0 }
-  const angle = (index / count) * Math.PI * 2 - Math.PI / 2
-  const radius = Math.max(210, count * 30)
-  return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius }
+function nodeSortKey(node: GraphNode) {
+  return `${node.ip || '999.999.999.999'}-${node.label}-${node.id}`
+}
+
+function positionForSlot(slot: number, total: number) {
+  if (total === 1) return { x: canvasPadding + 330, y: canvasPadding + 230 }
+  if (total === 2) return { x: canvasPadding + slot * 560, y: canvasPadding + 240 }
+  const columns = Math.min(3, Math.ceil(Math.sqrt(total)))
+  const column = slot % columns
+  const row = Math.floor(slot / columns)
+  return { x: canvasPadding + column * 470, y: canvasPadding + row * 240 }
 }
 
 export function GraphView({ graph, onNodeSelect }: Props) {
   const [clock, setClock] = useState(() => Date.now())
+  const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 })
+  const [panning, setPanning] = useState(false)
+  const canvasRef = useRef<HTMLDivElement>(null)
+  const lastVMNodes = useRef<GraphNode[]>([])
+  const panState = useRef<{
+    pointerId: number
+    startPointer: Point
+    startViewport: Viewport
+  }>()
 
   useEffect(() => {
     const interval = window.setInterval(() => setClock(Date.now()), 250)
     return () => window.clearInterval(interval)
   }, [])
 
+  function zoomAt(clientPoint: Point, nextZoom: number) {
+    const rect = canvasRef.current?.getBoundingClientRect()
+    if (!rect) return
+    setViewport((current) => {
+      const zoom = clampZoom(nextZoom)
+      const graphPoint = {
+        x: (clientPoint.x - rect.left - current.x) / current.zoom,
+        y: (clientPoint.y - rect.top - current.y) / current.zoom,
+      }
+      return {
+        zoom,
+        x: clientPoint.x - rect.left - graphPoint.x * zoom,
+        y: clientPoint.y - rect.top - graphPoint.y * zoom,
+      }
+    })
+  }
+
+  function zoomFromCenter(factor: number) {
+    const rect = canvasRef.current?.getBoundingClientRect()
+    if (!rect) return
+    zoomAt({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }, viewport.zoom * factor)
+  }
+
+  function handleWheel(event: ReactWheelEvent<HTMLDivElement>) {
+    event.preventDefault()
+    const factor = event.deltaY < 0 ? 1.12 : 0.88
+    zoomAt({ x: event.clientX, y: event.clientY }, viewport.zoom * factor)
+  }
+
+  function handlePanPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return
+    const target = event.target instanceof HTMLElement ? event.target : undefined
+    if (target?.closest('button')) return
+    event.currentTarget.setPointerCapture(event.pointerId)
+    panState.current = {
+      pointerId: event.pointerId,
+      startPointer: { x: event.clientX, y: event.clientY },
+      startViewport: viewport,
+    }
+    setPanning(true)
+  }
+
+  function handlePanPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const pan = panState.current
+    if (!pan || pan.pointerId !== event.pointerId) return
+    setViewport({
+      ...pan.startViewport,
+      x: pan.startViewport.x + event.clientX - pan.startPointer.x,
+      y: pan.startViewport.y + event.clientY - pan.startPointer.y,
+    })
+  }
+
+  function finishPan(event: ReactPointerEvent<HTMLDivElement>) {
+    const pan = panState.current
+    if (!pan || pan.pointerId !== event.pointerId) return
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    panState.current = undefined
+    setPanning(false)
+  }
+
   // The main topology is VM-only. Unknown/private and public endpoints remain
   // available through the API without becoming graph nodes.
-  const vmNodes = useMemo(() => graph.nodes.filter((node) => node.type === 'vm'), [graph.nodes])
-  const vmIDs = useMemo(() => new Set(vmNodes.map((node) => node.id)), [vmNodes])
+  const vmNodes = useMemo(() => graph.nodes
+    .filter((node) => node.type === 'vm')
+    .sort((a, b) => nodeSortKey(a).localeCompare(nodeSortKey(b))), [graph.nodes])
+  if (vmNodes.length > 0) {
+    lastVMNodes.current = vmNodes
+  }
+  const visibleVMNodes = vmNodes.length > 0 ? vmNodes : lastVMNodes.current
+  const vmIDs = useMemo(() => new Set(visibleVMNodes.map((node) => node.id)), [visibleVMNodes])
 
-  const nodes = useMemo<Node[]>(() => vmNodes.map((node, index) => {
+  const nodes = useMemo(() => visibleVMNodes.map((node, index) => {
     const status = node.status || 'unknown'
     const color = statusColors[status] || statusColors.unknown
-    const online = node.status === 'online'
+    const position = positionForSlot(index, visibleVMNodes.length)
     return {
-      id: node.id,
-      position: positionFor(index, vmNodes.length),
-      className: `vm-node vm-node-${status}`,
-      data: {
-        label: <div
-          data-testid={`node-${node.id}`}
-          className="vm-node-content"
-          title={`${node.label} · ${node.ip || 'no IP'} · ${status}`}
-        >
-          <VMIcon />
-          <strong>{node.label}</strong>
-          <NodeStatusIcon status={status} />
-        </div>,
-      },
-      style: {
-        background: '#252a30', border: `1px solid ${online ? color : `${color}80`}`, color: '#f1f3f5',
-        borderRadius: 999, minWidth: 210,
-        boxShadow: 'none',
-        opacity: online ? 1 : 0.68,
-        padding: '12px 24px',
-      },
+      node,
+      color,
+      status,
+      position,
+      center: { x: position.x + nodeWidth / 2, y: position.y + nodeHeight / 2 },
     }
-  }), [vmNodes])
+  }), [visibleVMNodes])
+  const nodeByID = useMemo(() => new Map(nodes.map((item) => [item.node.id, item])), [nodes])
 
-  const edges = useMemo<Edge[]>(() => {
+  const edges = useMemo(() => {
     // Several ports/protocols between the same VM pair become one visual edge.
     // Individual aggregated flows remain available in the backend.
     const relationships = new Map<string, { source: string; target: string; weight: number; activeUntil: number }>()
@@ -104,44 +200,92 @@ export function GraphView({ graph, onNodeSelect }: Props) {
       relationships.set(key, current)
     })
 
-    return Array.from(relationships.entries()).map(([id, relationship]) => {
+    return Array.from(relationships.entries()).flatMap(([id, relationship]) => {
+      const source = nodeByID.get(relationship.source)
+      const target = nodeByID.get(relationship.target)
+      if (!source || !target) return []
       const active = relationship.activeUntil > clock
       const color = active ? '#6fa88b' : '#4a515a'
       return {
         id,
-        source: relationship.source,
-        target: relationship.target,
-        animated: active,
-        className: active ? 'traffic-active' : 'traffic-idle',
-        markerStart: { type: MarkerType.ArrowClosed, color },
-        markerEnd: { type: MarkerType.ArrowClosed, color },
-        style: {
-          stroke: color,
-          strokeWidth: active ? Math.min(4, 1.25 + relationship.weight * 0.4) : 1,
-          opacity: active ? 0.9 : 0.3,
-        },
+        active,
+        color,
+        width: active ? Math.min(4, 1.25 + relationship.weight * 0.4) : 1,
+        opacity: active ? 0.9 : 0.3,
+        // Draw from node center to node center. Nodes are rendered above the SVG,
+        // so the line visually enters each node instead of stopping with a gap.
+        path: curvedPath(source.center, target.center),
       }
     })
-  }, [clock, graph.edges, vmIDs])
+  }, [clock, graph.edges, nodeByID, vmIDs])
 
-  return <div className="graph-canvas">
-    {vmNodes.length === 0 && <div className="graph-empty"><strong>Waiting for VM</strong><span></span></div>}
-    <ReactFlow
-      nodes={nodes}
-      edges={edges}
-      fitView
-      fitViewOptions={{ padding: 0.25 }}
-      minZoom={0.15}
-      nodesDraggable={false}
-      nodesConnectable={false}
-      elementsSelectable
-      onNodeClick={(_, node) => {
-        const original = vmNodes.find((item) => item.id === node.id)
-        if (original) onNodeSelect(original)
+  const canvas = useMemo(() => {
+    const maxX = Math.max(...nodes.map((item) => item.position.x + nodeWidth + canvasPadding), minCanvasWidth)
+    const maxY = Math.max(...nodes.map((item) => item.position.y + nodeHeight + canvasPadding), minCanvasHeight)
+    return { width: maxX, height: maxY }
+  }, [nodes])
+
+  return <div
+    ref={canvasRef}
+    className={`graph-canvas${panning ? ' panning' : ''}`}
+    onWheel={handleWheel}
+    onPointerDown={handlePanPointerDown}
+    onPointerMove={handlePanPointerMove}
+    onPointerUp={finishPan}
+    onPointerCancel={finishPan}
+  >
+    {visibleVMNodes.length === 0 && <div className="graph-empty"><strong>Waiting for VM</strong><span></span></div>}
+    <div
+      className="graph-map"
+      style={{
+        width: canvas.width,
+        height: canvas.height,
+        transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
       }}
     >
-      <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#2b3138" />
-      <Controls position="bottom-left" />
-    </ReactFlow>
+      <div className="graph-grid" />
+      <svg className="graph-edges" viewBox={`0 0 ${canvas.width} ${canvas.height}`} aria-hidden="true">
+        <defs>
+          <marker id="edge-arrow-active" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
+            <path d="M 1 1 L 9 5 L 1 9 z" fill="#6fa88b" />
+          </marker>
+          <marker id="edge-arrow-idle" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
+            <path d="M 1 1 L 9 5 L 1 9 z" fill="#4a515a" />
+          </marker>
+        </defs>
+        {edges.map((edge) => <path
+          key={edge.id}
+          className={`graph-edge ${edge.active ? 'graph-edge-active' : 'graph-edge-idle'}`}
+          d={edge.path}
+          markerStart={`url(#${edge.active ? 'edge-arrow-active' : 'edge-arrow-idle'})`}
+          markerEnd={`url(#${edge.active ? 'edge-arrow-active' : 'edge-arrow-idle'})`}
+          style={{ stroke: edge.color, strokeWidth: edge.width, opacity: edge.opacity }}
+        />)}
+      </svg>
+      {nodes.map(({ node, color, status, position }) => <button
+        key={node.id}
+        type="button"
+        data-testid={`node-${node.id}`}
+        className={`graph-node-button vm-node-${status}`}
+        title={`${node.label} · ${node.ip || 'no IP'} · ${status}`}
+        style={{ left: position.x, top: position.y, borderColor: node.status === 'online' ? color : `${color}80` }}
+        onClick={() => onNodeSelect(node)}
+      >
+        <div className="vm-node-content">
+          <VMIcon />
+          <span className="vm-node-text">
+            <strong>{node.label}</strong>
+            <small>{node.ip || 'no IP'} · {status}</small>
+          </span>
+          <NodeStatusIcon status={status} />
+        </div>
+      </button>)}
+    </div>
+    <div className="graph-controls" aria-label="Map controls">
+      <button type="button" onClick={() => zoomFromCenter(1.18)}>+</button>
+      <button type="button" onClick={() => zoomFromCenter(0.82)}>−</button>
+      <button type="button" onClick={() => setViewport({ x: 0, y: 0, zoom: 1 })}>Reset</button>
+      <span>{Math.round(viewport.zoom * 100)}%</span>
+    </div>
   </div>
 }

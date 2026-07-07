@@ -14,7 +14,7 @@ function activityTime(value: string) {
 export function InternalActivityTable({ activity }: { activity: InternalActivity[] }) {
   return <section className="activity-card">
     <div className="activity-heading">
-      <div><small>INTERNAL ACTIVITY</small><span>Connection metadata only</span></div>
+      <div><small>INTERNAL ACTIVITY</small><span>Registered VM-to-VM observations</span></div>
       <span>{activity.length} recent observations</span>
     </div>
     <div className="activity-table-wrap">
