@@ -66,7 +66,7 @@ func (c *MockCollector) event(now time.Time) model.FlowEvent {
 		SrcPort: 32000 + c.random.Intn(25000), DstPort: destination.port,
 		Protocol: destination.protocol, Direction: "egress", BytesSent: bytesSent,
 		BytesReceived: bytesReceived, Packets: (bytesSent+bytesReceived)/1200 + 1,
-		ConnectionCount: connections, FirstSeen: now.Add(-time.Duration(100+c.random.Intn(900)) * time.Millisecond),
+		ConnectionCount: connections, RequestCount: connections, FirstSeen: now.Add(-time.Duration(100+c.random.Intn(900)) * time.Millisecond),
 		LastSeen: now, Interface: iface,
 	}
 }

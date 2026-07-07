@@ -27,12 +27,12 @@ func TestFlowAccumulatorPreservesByteTotals(t *testing.T) {
 	accumulator.Add(model.FlowEvent{
 		AgentID: "agent-a", SrcIP: "10.20.20.130", DstIP: "140.82.121.4",
 		SrcPort: 45000, DstPort: 443, Protocol: "tcp", Direction: "ingress",
-		BytesReceived: 8 * 1024 * 1024, FirstSeen: first, LastSeen: first,
+		BytesReceived: 8 * 1024 * 1024, ConnectionCount: 2, RequestCount: 2, FirstSeen: first, LastSeen: first,
 	})
 	accumulator.Add(model.FlowEvent{
 		AgentID: "agent-a", SrcIP: "10.20.20.130", DstIP: "140.82.121.4",
 		SrcPort: 45000, DstPort: 443, Protocol: "tcp", Direction: "ingress",
-		BytesReceived: 17 * 1024 * 1024, FirstSeen: last, LastSeen: last,
+		BytesReceived: 17 * 1024 * 1024, ConnectionCount: 3, RequestCount: 3, FirstSeen: last, LastSeen: last,
 	})
 
 	batch := accumulator.Drain()
@@ -41,6 +41,9 @@ func TestFlowAccumulatorPreservesByteTotals(t *testing.T) {
 	}
 	if got, want := batch[0].BytesReceived, int64(25*1024*1024); got != want {
 		t.Fatalf("received bytes = %d, want %d", got, want)
+	}
+	if got, want := batch[0].RequestCount, int64(5); got != want {
+		t.Fatalf("request count = %d, want %d", got, want)
 	}
 	if !batch[0].FirstSeen.Equal(first) || !batch[0].LastSeen.Equal(last) {
 		t.Fatalf("unexpected time window: %s - %s", batch[0].FirstSeen, batch[0].LastSeen)

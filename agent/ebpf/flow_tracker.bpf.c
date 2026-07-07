@@ -11,15 +11,18 @@
 #define DIR_EGRESS 2
 #define IPPROTO_TCP_VALUE 6
 #define IPPROTO_UDP_VALUE 17
+#define AF_INET_VALUE 2
+#define AF_INET6_VALUE 10
 
 struct flow_event {
     __u64 timestamp_ns;
     __u64 bytes;
-    __u32 src_addr;
-    __u32 dst_addr;
+    __u8 src_addr[16];
+    __u8 dst_addr[16];
     __u32 connections;
     __u16 src_port;
     __u16 dst_port;
+    __u16 family;
     __u8 protocol;
     __u8 direction;
 };
@@ -41,8 +44,17 @@ static __always_inline void socket_metadata(struct flow_event *event, struct soc
 {
     // Keep the local VM as source for both directions. Direction tells the
     // backend whether the bytes were sent or received by this agent.
-    event->src_addr = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
-    event->dst_addr = BPF_CORE_READ(sk, __sk_common.skc_daddr);
+    event->family = BPF_CORE_READ(sk, __sk_common.skc_family);
+    if (event->family == AF_INET6_VALUE) {
+        BPF_CORE_READ_INTO(&event->src_addr, sk, __sk_common.skc_v6_rcv_saddr);
+        BPF_CORE_READ_INTO(&event->dst_addr, sk, __sk_common.skc_v6_daddr);
+    } else {
+        __u32 src_addr = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
+        __u32 dst_addr = BPF_CORE_READ(sk, __sk_common.skc_daddr);
+        __builtin_memcpy(event->src_addr, &src_addr, sizeof(src_addr));
+        __builtin_memcpy(event->dst_addr, &dst_addr, sizeof(dst_addr));
+        event->family = AF_INET_VALUE;
+    }
     event->src_port = BPF_CORE_READ(sk, __sk_common.skc_num);
     event->dst_port = __builtin_bswap16(BPF_CORE_READ(sk, __sk_common.skc_dport));
     event->protocol = protocol;
@@ -91,6 +103,9 @@ static __always_inline int finish_io(struct pt_regs *ctx)
 SEC("kprobe/tcp_v4_connect")
 int BPF_KPROBE(trace_tcp_connect, struct sock *sk) { return emit_connection(sk, IPPROTO_TCP_VALUE, DIR_EGRESS); }
 
+SEC("kprobe/tcp_v6_connect")
+int BPF_KPROBE(trace_tcp_v6_connect, struct sock *sk) { return emit_connection(sk, IPPROTO_TCP_VALUE, DIR_EGRESS); }
+
 SEC("kretprobe/inet_csk_accept")
 int trace_tcp_accept(struct pt_regs *ctx)
 {
@@ -117,4 +132,3 @@ SEC("kretprobe/udp_recvmsg")
 int trace_udp_recv_ret(struct pt_regs *ctx) { return finish_io(ctx); }
 
 char LICENSE[] SEC("license") = "GPL";
-

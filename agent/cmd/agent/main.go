@@ -138,6 +138,7 @@ func (a *flowAccumulator) Add(event model.FlowEvent) {
 	current.BytesReceived += event.BytesReceived
 	current.Packets += event.Packets
 	current.ConnectionCount += event.ConnectionCount
+	current.RequestCount += event.RequestCount
 	if current.FirstSeen.IsZero() || (!event.FirstSeen.IsZero() && event.FirstSeen.Before(current.FirstSeen)) {
 		current.FirstSeen = event.FirstSeen
 	}

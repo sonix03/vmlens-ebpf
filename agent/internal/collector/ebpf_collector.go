@@ -21,13 +21,15 @@ import (
 type rawFlowEvent struct {
 	TimestampNS uint64
 	Bytes       uint64
-	SrcAddr     uint32
-	DstAddr     uint32
+	SrcAddr     [16]byte
+	DstAddr     [16]byte
 	Connections uint32
 	SrcPort     uint16
 	DstPort     uint16
+	Family      uint16
 	Protocol    uint8
 	Direction   uint8
+	Padding     [4]byte
 }
 
 type EBPFCollector struct {
@@ -60,6 +62,7 @@ func NewEBPF(registration model.Registration, objectPath string) (*EBPFCollector
 		required bool
 	}{
 		{"trace_tcp_connect", "tcp_v4_connect", false, true},
+		{"trace_tcp_v6_connect", "tcp_v6_connect", false, false},
 		{"trace_tcp_accept", "inet_csk_accept", true, true},
 		{"trace_tcp_send", "tcp_sendmsg", false, true},
 		{"trace_tcp_send_ret", "tcp_sendmsg", true, true},
@@ -130,9 +133,11 @@ func (c *EBPFCollector) Run(ctx context.Context) (<-chan model.FlowEvent, <-chan
 }
 
 func (c *EBPFCollector) convert(raw rawFlowEvent) model.FlowEvent {
-	sourceIP, destinationIP := ipv4(raw.SrcAddr), ipv4(raw.DstAddr)
-	if sourceIP == "0.0.0.0" && len(c.registration.PrivateIPs) > 0 {
-		sourceIP = c.registration.PrivateIPs[0]
+	sourceIP, destinationIP := socketIP(raw.SrcAddr, raw.Family), socketIP(raw.DstAddr, raw.Family)
+	if parsed := net.ParseIP(sourceIP); parsed == nil || parsed.IsUnspecified() {
+		if fallback := c.fallbackSource(raw.Family); fallback != "" {
+			sourceIP = fallback
+		}
 	}
 	protocol := "tcp"
 	if raw.Protocol == 17 {
@@ -146,7 +151,8 @@ func (c *EBPFCollector) convert(raw rawFlowEvent) model.FlowEvent {
 	event := model.FlowEvent{
 		AgentID: c.registration.AgentID, SrcIP: sourceIP, DstIP: destinationIP,
 		SrcPort: int(raw.SrcPort), DstPort: int(raw.DstPort), Protocol: protocol,
-		Direction: direction, ConnectionCount: int64(raw.Connections), FirstSeen: now, LastSeen: now,
+		Direction: direction, ConnectionCount: int64(raw.Connections), RequestCount: requestCount(protocol, direction, raw),
+		FirstSeen: now, LastSeen: now,
 	}
 	if direction == "ingress" {
 		event.BytesReceived = int64(raw.Bytes)
@@ -159,10 +165,42 @@ func (c *EBPFCollector) convert(raw rawFlowEvent) model.FlowEvent {
 	return event
 }
 
-func ipv4(value uint32) string {
-	buffer := make([]byte, 4)
-	binary.LittleEndian.PutUint32(buffer, value)
-	return net.IP(buffer).String()
+func requestCount(protocol, direction string, raw rawFlowEvent) int64 {
+	if raw.Connections > 0 {
+		return int64(raw.Connections)
+	}
+	if protocol != "udp" || raw.Bytes == 0 {
+		return 0
+	}
+	switch direction {
+	case "egress", "ingress":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func socketIP(value [16]byte, family uint16) string {
+	if family == 10 {
+		return net.IP(value[:]).String()
+	}
+	return net.IP(value[:4]).String()
+}
+
+func (c *EBPFCollector) fallbackSource(family uint16) string {
+	if family == 10 {
+		for _, iface := range c.registration.Interfaces {
+			ip := net.ParseIP(iface.IPAddress)
+			if ip != nil && ip.To4() == nil && !ip.IsUnspecified() {
+				return ip.String()
+			}
+		}
+		return ""
+	}
+	if len(c.registration.PrivateIPs) > 0 {
+		return c.registration.PrivateIPs[0]
+	}
+	return ""
 }
 
 func (c *EBPFCollector) Close() error {
