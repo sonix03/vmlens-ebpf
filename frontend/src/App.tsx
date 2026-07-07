@@ -2,10 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './api/client'
 import { connectRealtime } from './api/realtime'
 import { GraphView } from './components/GraphView'
+import { InternalActivityTable } from './components/InternalActivityTable'
 import { NodeDetailsPanel } from './components/NodeDetailsPanel'
 import { StatCards } from './components/StatCards'
 import type { Flow } from './types/flow'
 import type { GraphData, GraphEdge, GraphFilters, GraphNode } from './types/graph'
+import type { InternalActivity } from './types/internalActivity'
 import type { Summary } from './types/stats'
 
 const graphWindow: GraphFilters = {
@@ -28,9 +30,17 @@ function isFlow(value: unknown): value is Flow {
 function applyLiveSummary(summary: Summary | undefined, flow: Flow, observedAt: string): Summary | undefined {
   if (!summary) return summary
   const bytes = flow.bytes_sent + flow.bytes_received
-  if (flow.scope === 'internal_same_tenant' || flow.scope === 'internal_cross_tenant') {
+  const requestCount = flow.request_count ?? 0
+  const requestPatch = {
+    network_requests_total: (summary.network_requests_total ?? 0) + requestCount,
+    network_requests_last_minute: (summary.network_requests_last_minute ?? 0) + requestCount,
+    network_requests_per_second: Math.max(summary.network_requests_per_second ?? 0, flow.requests_per_second ?? 0),
+    network_connections_per_second: Math.max(summary.network_connections_per_second ?? 0, flow.connections_per_second ?? 0),
+  }
+  if (flow.scope === 'internal_same_tenant' || flow.scope === 'internal_cross_tenant' || flow.scope === 'unknown_internal') {
     return {
       ...summary,
+      ...requestPatch,
       internal_bytes: summary.internal_bytes + bytes,
       internal_sent_bytes: summary.internal_sent_bytes + flow.bytes_sent,
       internal_received_bytes: summary.internal_received_bytes + flow.bytes_received,
@@ -40,13 +50,14 @@ function applyLiveSummary(summary: Summary | undefined, flow: Flow, observedAt: 
   if (flow.scope === 'external_public') {
     return {
       ...summary,
+      ...requestPatch,
       external_bytes: summary.external_bytes + bytes,
       external_sent_bytes: summary.external_sent_bytes + flow.bytes_sent,
       external_received_bytes: summary.external_received_bytes + flow.bytes_received,
       updated_at: observedAt,
     }
   }
-  return summary
+  return { ...summary, ...requestPatch, updated_at: observedAt }
 }
 
 function edgeWeight(bytes: number): number {
@@ -78,6 +89,7 @@ function applyLiveFlow(graph: GraphData, flow: Flow, observedAt: string): GraphD
     bytes_received: bytesReceived,
     packets: (previous?.packets ?? 0) + flow.packets,
     connection_count: (previous?.connection_count ?? 0) + flow.connection_count,
+    request_count: (previous?.request_count ?? 0) + (flow.request_count ?? 0),
     first_seen: previous?.first_seen ?? flow.first_seen,
     last_seen: flow.last_seen,
     last_observed_at: observedAt,
@@ -103,6 +115,7 @@ function applyLiveFlow(graph: GraphData, flow: Flow, observedAt: string): GraphD
 export function App() {
   const [graph, setGraph] = useState<GraphData>({ nodes: [], edges: [] })
   const [summary, setSummary] = useState<Summary>()
+  const [internalActivity, setInternalActivity] = useState<InternalActivity[]>([])
   const [selectedNode, setSelectedNode] = useState<GraphNode>()
   const [connected, setConnected] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -111,11 +124,14 @@ export function App() {
 
   const load = useCallback(async () => {
     try {
-      const [nextGraph, nextSummary] = await Promise.all([api.graph(graphWindow), api.summary()])
-      setGraph(nextGraph); setSummary(nextSummary); setError('')
+      const [nextGraph, nextSummary, nextActivity] = await Promise.all([
+        api.graph(graphWindow), api.summary(), api.internalActivity(),
+      ])
+      setGraph(nextGraph); setSummary(nextSummary); setInternalActivity(nextActivity); setError('')
     } catch (reason) {
       setGraph({ nodes: [], edges: [] })
       setSummary(undefined)
+      setInternalActivity([])
       setSelectedNode(undefined)
       setError(reason instanceof Error ? reason.message : 'Unable to load network data')
     } finally { setLoading(false) }
@@ -181,6 +197,7 @@ export function App() {
       </div>
       {selectedNode && <NodeDetailsPanel node={selectedNode} onClose={() => setSelectedNode(undefined)} />}
     </section>
+    <InternalActivityTable activity={internalActivity} />
     <footer><span></span><span>{vmCount} VMs · {relationshipCount} relationships</span></footer>
   </main>
 }

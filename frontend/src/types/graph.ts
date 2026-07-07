@@ -25,6 +25,7 @@ export interface GraphEdge {
   bytes_received: number
   packets: number
   connection_count: number
+  request_count: number
   first_seen: string
   last_seen: string
   last_observed_at: string

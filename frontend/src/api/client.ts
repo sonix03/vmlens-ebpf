@@ -1,6 +1,7 @@
 import type { Agent } from '../types/agent'
 import type { Flow } from '../types/flow'
 import type { GraphData, GraphFilters } from '../types/graph'
+import type { InternalActivity } from '../types/internalActivity'
 import type { Summary, TopTalker } from '../types/stats'
 import type { VM } from '../types/vm'
 
@@ -31,4 +32,5 @@ export const api = {
   agents: () => get<Agent[]>('/api/agents'),
   vms: () => get<VM[]>('/api/vms'),
   flows: () => get<Flow[]>('/api/flows'),
+  internalActivity: () => get<InternalActivity[]>('/api/internal/activity?limit=100'),
 }

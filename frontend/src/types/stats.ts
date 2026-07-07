@@ -13,6 +13,10 @@ export interface Summary {
   external_sent_bytes: number
   external_received_bytes: number
   unknown_internal_hosts: number
+  network_requests_total: number
+  network_requests_last_minute: number
+  network_requests_per_second: number
+  network_connections_per_second: number
   updated_at: string
 }
 
