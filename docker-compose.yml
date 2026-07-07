@@ -20,7 +20,7 @@ services:
     environment:
       LISTEN_ADDR: ":8080"
       DATABASE_URL: postgres://${POSTGRES_USER:-vmlens}:${POSTGRES_PASSWORD:-vmlens}@postgres:5432/${POSTGRES_DB:-vmlens}?sslmode=disable
-      INTERNAL_CIDRS: ${INTERNAL_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8}
+      INTERNAL_CIDRS: ${INTERNAL_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,fc00::/7,fe80::/10,::1/128}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       FLOW_ACTIVE_WINDOW: ${FLOW_ACTIVE_WINDOW:-3s}
       STATUS_SWEEP_PERIOD: ${STATUS_SWEEP_PERIOD:-10s}

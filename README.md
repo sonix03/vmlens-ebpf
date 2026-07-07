@@ -64,7 +64,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Open:
+Buka:
 
 - frontend: http://localhost:3000
 - API health: http://localhost:8080/health
@@ -87,6 +87,117 @@ docker compose logs -f backend frontend postgres
 docker compose down
 docker compose down -v   # also deletes local PostgreSQL test data
 ```
+
+## Simple cloud VM setup
+
+Use this when the dashboard runs locally, while agents run on cloud VMs that are
+reachable over SSH.
+
+### 1. Start the local dashboard
+
+```bash
+docker compose up -d --build
+curl http://127.0.0.1:8080/health
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
+
+### 2. Start one tunnel for each cloud VM
+
+On your local machine:
+
+```bash
+bash scripts/vmlens-tunnel.sh start <VM_A_PUBLIC_IP>
+bash scripts/vmlens-tunnel.sh start <VM_B_PUBLIC_IP>
+```
+
+After this, each VM can reach the local backend through:
+
+```text
+http://127.0.0.1:18080
+```
+
+Normal SSH access stays unchanged:
+
+```bash
+ssh ubuntu@<VM_PUBLIC_IP>
+```
+
+### 3. Install and start the agent on each VM
+
+On each VM:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git golang-go clang bpftool libbpf-dev
+
+git clone <repo-url>
+cd vmlens-ebpf
+
+BACKEND_URL=http://127.0.0.1:18080 \
+AGENT_PUBLIC_IP=<THIS_VM_PUBLIC_IP> \
+bash scripts/vmlens-agent.sh start
+```
+
+Check:
+
+```bash
+bash scripts/vmlens-agent.sh status
+bash scripts/vmlens-agent.sh logs
+```
+
+### 4. Test communication between cloud VMs
+
+On VM B:
+
+```bash
+python3 -m http.server 8081 --bind 0.0.0.0
+```
+
+On VM A:
+
+```bash
+for i in $(seq 1 20); do curl -s -o /dev/null http://<VM_B_PUBLIC_IP>:8081/; sleep 0.2; done
+```
+
+Check the dashboard:
+
+```text
+http://localhost:3000
+```
+
+The VM line should animate, byte counters should increase, and
+`Request frequency` should show recent request activity.
+
+### 5. Stop
+
+On each VM:
+
+```bash
+bash scripts/vmlens-agent.sh stop
+```
+
+On your local machine:
+
+```bash
+bash scripts/vmlens-tunnel.sh stop <VM_A_PUBLIC_IP>
+bash scripts/vmlens-tunnel.sh stop <VM_B_PUBLIC_IP>
+docker compose down
+```
+
+Notes:
+
+- Open firewall/security group access for test port `8081` between VMs.
+- If VMs are in different clouds, private IPs usually cannot communicate
+  directly. Use public IPs, VPN, WireGuard, Tailscale, or another routed
+  network.
+- If the test uses public IPs, set `AGENT_PUBLIC_IP` so VMLens can resolve the
+  destination public IP back to the VM node.
+- Do not expose this backend to the public internet without TLS/authentication.
 
 ## Runtime behavior
 

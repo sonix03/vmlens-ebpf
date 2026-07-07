@@ -13,3 +13,5 @@
 - [10-realtime-check.md](10-realtime-check.md)
 - [11-external-git-clone.md](11-external-git-clone.md)
 - [12-external-known-bytes.md](12-external-known-bytes.md)
+- [13-request-frequency.md](13-request-frequency.md)
+- [14-cloud-vm-setup.md](14-cloud-vm-setup.md)
