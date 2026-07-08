@@ -1,0 +1,25 @@
+# VMLens VM inventory.
+#
+# Copy this file to:
+#
+#   configs/vms.local
+#
+# Format:
+#
+#   alias|host|ssh_user|ssh_key|remote_backend|local_backend
+#
+# Fields:
+#
+# - alias: readable name used by scripts.
+# - host: VM IP/hostname reachable over SSH from local laptop.
+# - ssh_user: SSH username, or "-" to use VMLENS_SSH_USER.
+# - ssh_key: SSH key path, "agent"/"none" for SSH config/ssh-agent, or "-" to use VMLENS_SSH_KEY.
+# - remote_backend: reverse tunnel listen address inside VM, or "-" to use VMLENS_REMOTE_BACKEND.
+# - local_backend: local dashboard API address, or "-" to use VMLENS_LOCAL_BACKEND.
+#
+# One shared key for all VMs is normal if the public key is installed on every VM.
+# Per-VM keys are also supported by setting different ssh_key values per row.
+
+testing-a-1|10.20.20.130|-|-|-|-
+testing-a-2|10.20.20.199|-|-|-|-
+testing-a-3|10.20.20.188|-|-|-|-
