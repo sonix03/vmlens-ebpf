@@ -1,0 +1,197 @@
+# VMLens OpenStack Configuration
+
+Use this when creating a new OpenStack VM. Paste the content into:
+
+```text
+Customization Script
+```
+
+OpenStack calls this feature `Customization Script`. It is the same idea as
+`User Data` or `cloud-init` in other clouds.
+
+## OpenStack Customization Script
+
+```yaml
+#cloud-config
+package_update: true
+package_upgrade: false
+
+write_files:
+  - path: /usr/local/sbin/vmlens-bootstrap.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euxo pipefail
+
+      REPO_URL="https://github.com/sonix03/vmlens-ebpf.git"
+      REPO_DIR="/opt/vmlens-ebpf"
+
+      BACKEND_URL="http://127.0.0.1:18080"
+      MOCK_MODE="false"
+      FLOW_INTERVAL="1s"
+
+      # Optional. Add local/tunnel/control-plane IPs here if they should not be tracked.
+      # Example: AGENT_IGNORE_IPS="10.20.20.125"
+      AGENT_IGNORE_IPS=""
+
+      export DEBIAN_FRONTEND=noninteractive
+
+      apt-get update
+      apt-get install -y ca-certificates git golang-go clang libbpf-dev linux-tools-common
+
+      apt-get install -y "linux-tools-$(uname -r)" || true
+      apt-get install -y bpftool || true
+
+      if ! command -v bpftool >/dev/null 2>&1; then
+        BPFTOOL_PATH="$(find /usr/lib/linux-tools* -name bpftool -type f 2>/dev/null | head -n1 || true)"
+        if [ -n "$BPFTOOL_PATH" ]; then
+          ln -sf "$BPFTOOL_PATH" /usr/local/bin/bpftool
+        fi
+      fi
+
+      command -v bpftool >/dev/null
+      test -r /sys/kernel/btf/vmlinux
+
+      rm -rf "$REPO_DIR"
+      git clone "$REPO_URL" "$REPO_DIR"
+
+      cd "$REPO_DIR"
+      chmod +x scripts/*.sh
+
+      env \
+        BACKEND_URL="$BACKEND_URL" \
+        MOCK_MODE="$MOCK_MODE" \
+        FLOW_INTERVAL="$FLOW_INTERVAL" \
+        AGENT_IGNORE_IPS="$AGENT_IGNORE_IPS" \
+        bash scripts/vmlens-agent.sh start
+
+runcmd:
+  - [ bash, /usr/local/sbin/vmlens-bootstrap.sh ]
+```
+
+## Local dashboard and tunnel
+
+Run on local:
+
+```bash
+cd /mnt/c/Documents/Ionext/vmlens-ebpf
+docker compose up -d --build
+```
+
+Start one tunnel per VM:
+
+```bash
+bash scripts/vmlens-tunnel.sh start <VM_IP>
+```
+
+Example:
+
+```bash
+bash scripts/vmlens-tunnel.sh start 10.20.20.130
+bash scripts/vmlens-tunnel.sh start 10.20.20.199
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
+
+## What happens if the tunnel is not ready yet
+
+The customization script runs once when the VM is created.
+
+It does this once:
+
+```text
+install packages
+clone repository
+build agent
+install systemd service
+start vmlens-agent
+```
+
+After that, `vmlens-agent` runs as a systemd service.
+
+If `BACKEND_URL=http://127.0.0.1:18080` is not reachable yet because the local
+reverse SSH tunnel is not running, the agent does not rerun the whole bootstrap
+script. Only the agent process retries registration.
+
+Retry delay:
+
+```text
+1s -> 2s -> 4s -> 8s -> 16s -> 30s
+```
+
+Then it keeps retrying about every 30 seconds until the backend is reachable.
+
+When the tunnel becomes available, the agent registers automatically and the VM
+node appears in the frontend.
+
+## Check from the VM
+
+Check service status:
+
+```bash
+sudo systemctl status vmlens-agent --no-pager
+```
+
+Follow logs:
+
+```bash
+sudo journalctl -u vmlens-agent -f
+```
+
+Check backend tunnel from inside the VM:
+
+```bash
+curl http://127.0.0.1:18080/health
+```
+
+Expected after tunnel is ready:
+
+```json
+{"database":"ok","status":"ok"}
+```
+
+## Restart agent
+
+```bash
+sudo systemctl restart vmlens-agent
+```
+
+## Stop agent
+
+```bash
+sudo systemctl stop vmlens-agent
+```
+
+## Disable auto-start on reboot
+
+```bash
+sudo systemctl disable vmlens-agent
+```
+
+## Uninstall agent
+
+```bash
+cd /opt/vmlens-ebpf
+sudo bash scripts/uninstall-agent.sh
+```
+
+## Notes
+
+`MOCK_MODE=false` means real eBPF capture.
+
+`BACKEND_URL=http://127.0.0.1:18080` works inside the VM only after the local
+machine creates a reverse SSH tunnel.
+
+Traffic is tracked at VM network level. For Kubernetes, Redis, PostgreSQL, and
+other services, the UI shows VM-to-VM communication and known ports such as:
+
+```text
+6379  redis
+5432  postgresql
+6443  kubernetes-api
+30000-32767 kubernetes-nodeport
+```
