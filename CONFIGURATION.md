@@ -78,7 +78,33 @@ cd /mnt/c/Documents/Ionext/vmlens-ebpf
 docker compose up -d --build
 ```
 
-Start one tunnel per VM:
+Create local operator config:
+
+```bash
+cp configs/local.env.example configs/local.env
+cp configs/vms.example configs/vms.local
+```
+
+Edit:
+
+```text
+configs/local.env
+configs/vms.local
+```
+
+List configured VMs:
+
+```bash
+bash scripts/vmlens-tunnel.sh list
+```
+
+Start all tunnels:
+
+```bash
+bash scripts/vmlens-tunnel.sh start-all
+```
+
+Or start one tunnel per VM:
 
 ```bash
 bash scripts/vmlens-tunnel.sh start <VM_IP>
@@ -91,11 +117,50 @@ bash scripts/vmlens-tunnel.sh start 10.20.20.130
 bash scripts/vmlens-tunnel.sh start 10.20.20.199
 ```
 
+Aliases from `configs/vms.local` also work:
+
+```bash
+bash scripts/vmlens-tunnel.sh start testing-a-1
+bash scripts/vmlens-tunnel.sh start testing-a-2
+```
+
 Open:
 
 ```text
 http://localhost:3000
 ```
+
+## SSH key model
+
+One shared SSH key for all VMs is normal if the same public key is installed on
+each VM.
+
+Example:
+
+```text
+testing-a-1|10.20.20.130|-|-|-|-
+testing-a-2|10.20.20.199|-|-|-|-
+testing-a-3|10.20.20.188|-|-|-|-
+```
+
+The `-` values mean: use defaults from `configs/local.env`.
+
+Per-VM keys are also supported:
+
+```text
+testing-a-1|10.20.20.130|ubuntu|~/.ssh/id_ed25519_vmlens_a1|-|-
+testing-a-2|10.20.20.199|ubuntu|~/.ssh/id_ed25519_vmlens_a2|-|-
+```
+
+If SSH already works through `~/.ssh/config` or `ssh-agent`, set the key to
+`agent` or `none`:
+
+```text
+testing-a-3|10.20.20.188|ubuntu|agent|-|-
+```
+
+Password-based SSH may prompt interactively, but key-based access is recommended
+for stable reverse tunnels.
 
 ## What happens if the tunnel is not ready yet
 

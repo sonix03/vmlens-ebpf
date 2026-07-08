@@ -5,6 +5,8 @@
 /data/
 *.log
 .env
+configs/local.env
+configs/vms.local
 frontend/node_modules/
 frontend/dist/
 frontend/*.tsbuildinfo
