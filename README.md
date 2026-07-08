@@ -2,7 +2,7 @@
 
 VMLens is an eBPF-powered VM network relationship tracker. Agents register the
 VMs on which they run, send heartbeats and metadata-only network flows to a Go
-API, and the API stores an aggregated topology in PostgreSQL. A React Flow UI
+API, and the API stores an aggregated topology in PostgreSQL. The dashboard
 renders the topology and refreshes through Server-Sent Events (SSE).
 
 ## Privacy boundary
@@ -28,13 +28,13 @@ queries, file contents, request/response bodies, TLS plaintext or command lines.
     `-- POST /api/flows/ingest
                   |
                   v
-         [Go backend :8080]
+      [control-plane API :8080]
            |-- PostgreSQL
            |-- REST graph/stats API
            `-- SSE /api/realtime
                   |
                   v
-       [React Flow frontend :3000]
+          [dashboard UI :3000]
 ```
 
 Registration is automatic. There is no VM-registration screen, required seed
@@ -43,12 +43,16 @@ record, or demo VM in the default stack.
 ## Repository
 
 ```text
-backend/    Go REST API, services, migrations and SSE hub
-agent/      Go agent, identity detection, mock/eBPF collectors and sender
-frontend/   React, TypeScript and React Flow graph
-scripts/    Linux agent install/uninstall scripts
+backend/    control-plane source: Go REST API, services, migrations and SSE hub
+agent/      VM agent source: identity detection, mock/eBPF collectors and sender
+frontend/   dashboard source: React, TypeScript and topology graph
+configs/    local operator config examples for SSH keys, VM list and paths
+scripts/    local tunnel and VM agent management scripts
 docker-compose.yml
 ```
+
+See [`docs/project-structure.md`](docs/project-structure.md) for the current
+runtime service names and folder conventions.
 
 ## Quick start
 
@@ -57,7 +61,7 @@ Requirements:
 - Docker Desktop or Docker Engine with Compose;
 - ports `3000`, `5432` and `8080` available.
 
-Start PostgreSQL, the backend and the frontend:
+Start the datastore, control-plane API and dashboard:
 
 ```bash
 cp .env.example .env
@@ -66,7 +70,7 @@ docker compose up -d --build
 
 Buka:
 
-- frontend: http://localhost:3000
+- dashboard: http://localhost:3000
 - API health: http://localhost:8080/health
 - live graph JSON: http://localhost:8080/api/graph
 
@@ -83,7 +87,7 @@ Useful commands:
 
 ```bash
 docker compose ps
-docker compose logs -f backend frontend postgres
+docker compose logs -f control-plane dashboard datastore
 docker compose down
 docker compose down -v   # also deletes local PostgreSQL test data
 ```
@@ -94,7 +98,7 @@ Use this when the dashboard runs locally, while agents run on cloud VMs that are
 reachable over SSH.
 
 Tracking happens inside each cloud VM. The local machine only runs PostgreSQL,
-the backend API, and the frontend dashboard. Do not install the agent locally
+the control-plane API, and the dashboard. Do not install the agent locally
 unless you also want to track the local machine as a VM node.
 
 For a copy-paste guide starting from a fresh clone, see
@@ -120,6 +124,15 @@ On your local machine:
 ```bash
 bash scripts/vmlens-tunnel.sh start <VM_A_PUBLIC_IP>
 bash scripts/vmlens-tunnel.sh start <VM_B_PUBLIC_IP>
+```
+
+Or configure the VM inventory once:
+
+```bash
+cp configs/local.env.example configs/local.env
+cp configs/vms.example configs/vms.local
+bash scripts/vmlens-tunnel.sh list
+bash scripts/vmlens-tunnel.sh start-all
 ```
 
 After this, each cloud VM agent can send observations to the local backend
