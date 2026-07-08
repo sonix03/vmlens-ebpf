@@ -82,15 +82,15 @@ Create local operator config:
 
 ```bash
 cp configs/local.env.example configs/local.env
-cp configs/vms.example configs/vms.local
 ```
 
 Edit:
 
 ```text
 configs/local.env
-configs/vms.local
 ```
+
+Put the VM list and SSH key mapping in `configs/local.env`.
 
 List configured VMs:
 
@@ -104,10 +104,11 @@ Start all tunnels:
 bash scripts/vmlens-tunnel.sh start-all
 ```
 
-Or start one tunnel per VM:
+Or start one tunnel per VM by alias or IP:
 
 ```bash
-bash scripts/vmlens-tunnel.sh start <VM_IP>
+bash scripts/vmlens-tunnel.sh start testing-a-1
+bash scripts/vmlens-tunnel.sh start <VM_IP_OR_HOST>
 ```
 
 Example:
@@ -117,7 +118,7 @@ bash scripts/vmlens-tunnel.sh start 10.20.20.130
 bash scripts/vmlens-tunnel.sh start 10.20.20.199
 ```
 
-Aliases from `configs/vms.local` also work:
+Aliases from `VMLENS_VM_PROFILES` also work:
 
 ```bash
 bash scripts/vmlens-tunnel.sh start testing-a-1
@@ -138,9 +139,20 @@ each VM.
 Example:
 
 ```text
-testing-a-1|10.20.20.130|-|-|-|-
-testing-a-2|10.20.20.199|-|-|-|-
-testing-a-3|10.20.20.188|-|-|-|-
+VMLENS_SSH_USER=ubuntu
+VMLENS_SSH_KEY=~/.ssh/id_ed25519_vmlens
+
+VMLENS_VM_PROFILES="testing_a_1 testing_a_2 testing_a_3"
+
+VMLENS_VM_TESTING_A_1_ALIAS=testing-a-1
+VMLENS_VM_TESTING_A_1_HOST=10.20.20.130
+VMLENS_VM_TESTING_A_1_SSH_USER=-
+VMLENS_VM_TESTING_A_1_SSH_KEY=-
+
+VMLENS_VM_TESTING_A_2_ALIAS=testing-a-2
+VMLENS_VM_TESTING_A_2_HOST=10.20.20.199
+VMLENS_VM_TESTING_A_2_SSH_USER=-
+VMLENS_VM_TESTING_A_2_SSH_KEY=-
 ```
 
 The `-` values mean: use defaults from `configs/local.env`.
@@ -148,15 +160,15 @@ The `-` values mean: use defaults from `configs/local.env`.
 Per-VM keys are also supported:
 
 ```text
-testing-a-1|10.20.20.130|ubuntu|~/.ssh/id_ed25519_vmlens_a1|-|-
-testing-a-2|10.20.20.199|ubuntu|~/.ssh/id_ed25519_vmlens_a2|-|-
+VMLENS_VM_TESTING_A_1_SSH_KEY=~/.ssh/id_ed25519_vmlens_a1
+VMLENS_VM_TESTING_A_2_SSH_KEY=~/.ssh/id_ed25519_vmlens_a2
 ```
 
 If SSH already works through `~/.ssh/config` or `ssh-agent`, set the key to
 `agent` or `none`:
 
 ```text
-testing-a-3|10.20.20.188|ubuntu|agent|-|-
+VMLENS_VM_TESTING_A_3_SSH_KEY=agent
 ```
 
 Password-based SSH may prompt interactively, but key-based access is recommended
