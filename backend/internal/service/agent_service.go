@@ -21,6 +21,11 @@ type AgentService struct {
 	hub  *realtime.Hub
 }
 
+const (
+	agentOnlineWindow = time.Minute
+	agentStaleWindow  = 5 * time.Minute
+)
+
 func NewAgentService(pool *pgxpool.Pool, hub *realtime.Hub) *AgentService {
 	return &AgentService{pool: pool, hub: hub}
 }
@@ -233,27 +238,29 @@ func (s *AgentService) UpdateStatuses(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	onlineWindow := fmt.Sprintf("%f seconds", agentOnlineWindow.Seconds())
+	staleWindow := fmt.Sprintf("%f seconds", agentStaleWindow.Seconds())
 	agentTag, err := tx.Exec(ctx, `
 		UPDATE agents SET status = CASE
-			WHEN last_seen >= NOW() - INTERVAL '1 minute' THEN 'online'
-			WHEN last_seen >= NOW() - INTERVAL '5 minutes' THEN 'stale'
+			WHEN last_seen >= NOW() - $1::interval THEN 'online'
+			WHEN last_seen >= NOW() - $2::interval THEN 'stale'
 			ELSE 'offline' END
 		WHERE status IS DISTINCT FROM CASE
-			WHEN last_seen >= NOW() - INTERVAL '1 minute' THEN 'online'
-			WHEN last_seen >= NOW() - INTERVAL '5 minutes' THEN 'stale'
-			ELSE 'offline' END`)
+			WHEN last_seen >= NOW() - $1::interval THEN 'online'
+			WHEN last_seen >= NOW() - $2::interval THEN 'stale'
+			ELSE 'offline' END`, onlineWindow, staleWindow)
 	if err != nil {
 		return err
 	}
 	vmTag, err := tx.Exec(ctx, `
 		UPDATE vms SET status = CASE
-			WHEN last_seen >= NOW() - INTERVAL '1 minute' THEN 'online'
-			WHEN last_seen >= NOW() - INTERVAL '5 minutes' THEN 'stale'
+			WHEN last_seen >= NOW() - $1::interval THEN 'online'
+			WHEN last_seen >= NOW() - $2::interval THEN 'stale'
 			ELSE 'offline' END
 		WHERE status IS DISTINCT FROM CASE
-			WHEN last_seen >= NOW() - INTERVAL '1 minute' THEN 'online'
-			WHEN last_seen >= NOW() - INTERVAL '5 minutes' THEN 'stale'
-			ELSE 'offline' END`)
+			WHEN last_seen >= NOW() - $1::interval THEN 'online'
+			WHEN last_seen >= NOW() - $2::interval THEN 'stale'
+			ELSE 'offline' END`, onlineWindow, staleWindow)
 	if err != nil {
 		return err
 	}
@@ -265,6 +272,17 @@ func (s *AgentService) UpdateStatuses(ctx context.Context) error {
 		s.hub.Broadcast("status.changed", map[string]any{"updated": updated})
 	}
 	return nil
+}
+
+func agentStatusForLastSeen(now, lastSeen time.Time) string {
+	age := now.Sub(lastSeen)
+	if age <= agentOnlineWindow {
+		return "online"
+	}
+	if age <= agentStaleWindow {
+		return "stale"
+	}
+	return "offline"
 }
 
 // DeleteExpired removes agent-backed VM nodes only after they have missed
