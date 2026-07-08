@@ -1,4 +1,6 @@
-# VMLens VM inventory.
+# VMLens legacy VM inventory.
+#
+# Prefer configs/local.env and VMLENS_VM_PROFILES for new setups.
 #
 # Copy this file to:
 #
