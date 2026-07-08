@@ -126,14 +126,16 @@ bash scripts/vmlens-tunnel.sh start <VM_A_PUBLIC_IP>
 bash scripts/vmlens-tunnel.sh start <VM_B_PUBLIC_IP>
 ```
 
-Or configure the VM inventory once:
+Or configure the VM list and SSH keys once:
 
 ```bash
 cp configs/local.env.example configs/local.env
-cp configs/vms.example configs/vms.local
 bash scripts/vmlens-tunnel.sh list
 bash scripts/vmlens-tunnel.sh start-all
 ```
+
+`configs/local.env` contains the VM profiles, IP/host, SSH user, and SSH key
+path for each VM. `configs/vms.local` is only a legacy fallback.
 
 After this, each cloud VM agent can send observations to the local backend
 through:
