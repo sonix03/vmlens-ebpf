@@ -1,5 +1,5 @@
 services:
-  postgres:
+  datastore:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-vmlens}
@@ -15,29 +15,29 @@ services:
     ports:
       - "5432:5432"
 
-  backend:
+  control-plane:
     build: ./backend
     environment:
       LISTEN_ADDR: ":8080"
-      DATABASE_URL: postgres://${POSTGRES_USER:-vmlens}:${POSTGRES_PASSWORD:-vmlens}@postgres:5432/${POSTGRES_DB:-vmlens}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-vmlens}:${POSTGRES_PASSWORD:-vmlens}@datastore:5432/${POSTGRES_DB:-vmlens}?sslmode=disable
       INTERNAL_CIDRS: ${INTERNAL_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,fc00::/7,fe80::/10,::1/128}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       FLOW_ACTIVE_WINDOW: ${FLOW_ACTIVE_WINDOW:-8s}
       STATUS_SWEEP_PERIOD: ${STATUS_SWEEP_PERIOD:-10s}
       VM_DELETE_AFTER: ${VM_DELETE_AFTER:-0}
     depends_on:
-      postgres:
+      datastore:
         condition: service_healthy
     ports:
       - "8080:8080"
 
-  frontend:
+  dashboard:
     build:
       context: ./frontend
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:8080}
     depends_on:
-      - backend
+      - control-plane
     ports:
       - "3000:80"
 
