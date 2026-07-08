@@ -18,7 +18,7 @@ down:
 	docker compose down
 
 logs:
-	docker compose logs -f backend frontend postgres
+	docker compose logs -f control-plane dashboard datastore
 
 clean:
 	docker compose down -v --remove-orphans
