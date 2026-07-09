@@ -19,6 +19,12 @@ if [[ -z "${BACKEND_URL}" ]]; then
   exit 1
 fi
 
+export HOME="${HOME:-/root}"
+export GOPATH="${GOPATH:-/root/go}"
+export GOMODCACHE="${GOMODCACHE:-${GOPATH}/pkg/mod}"
+export GOCACHE="${GOCACHE:-/root/.cache/go-build}"
+mkdir -p "${GOMODCACHE}" "${GOCACHE}"
+
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 command -v go >/dev/null || { echo "go is required" >&2; exit 1; }
 cd "${repo_dir}/agent"
