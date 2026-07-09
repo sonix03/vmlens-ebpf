@@ -5,7 +5,8 @@ eBPF programs on the VM.
 
 ## Build artifacts locally
 
-Run on a Linux machine with Go, clang, libbpf-dev, bpftool, and kernel BTF:
+Run on a Linux machine with Go, clang with BPF target support, libbpf-dev,
+bpftool, and kernel BTF:
 
 ```bash
 bash scripts/build-agent-release.sh

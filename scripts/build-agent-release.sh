@@ -7,7 +7,23 @@ out_dir="${OUT_DIR:-${repo_dir}/dist/agent/${version}}"
 target_arches="${TARGET_ARCHES:-amd64}"
 
 command -v go >/dev/null || { echo "go is required" >&2; exit 1; }
-command -v clang >/dev/null || { echo "clang is required" >&2; exit 1; }
+if [[ -n "${CLANG_BIN:-}" ]]; then
+  command -v "${CLANG_BIN}" >/dev/null || { echo "${CLANG_BIN} is required" >&2; exit 1; }
+  clang_bin="${CLANG_BIN}"
+else
+  clang_bin=""
+  for candidate in clang-18 clang-17 clang; do
+    if command -v "${candidate}" >/dev/null 2>&1; then
+      clang_bin="${candidate}"
+      break
+    fi
+  done
+  [[ -n "${clang_bin}" ]] || { echo "clang is required" >&2; exit 1; }
+fi
+"${clang_bin}" -print-targets 2>/dev/null | grep -q '^[[:space:]]*bpf[[:space:]]' || {
+  echo "${clang_bin} does not support the bpf target" >&2
+  exit 1
+}
 if ! command -v bpftool >/dev/null 2>&1; then
   bpftool_path="$(find /usr/lib/linux-tools* -name bpftool -type f 2>/dev/null | head -n1 || true)"
   if [[ -n "${bpftool_path}" ]]; then
@@ -40,7 +56,7 @@ for arch in ${target_arches}; do
   )
 
   echo "building flow_tracker eBPF object for ${arch}"
-  clang -O2 -g -target bpf -D"__TARGET_ARCH_${bpf_arch}" \
+  "${clang_bin}" -O2 -g -target bpf -D"__TARGET_ARCH_${bpf_arch}" \
     -I "${tmp_dir}" \
     -c "${repo_dir}/agent/ebpf/flow_tracker.bpf.c" \
     -o "${out_dir}/flow_tracker-linux-${arch}.bpf.o"
