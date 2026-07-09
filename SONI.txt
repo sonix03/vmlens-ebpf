@@ -1,121 +1,37 @@
-VMLens End-to-End Test From Zero
-================================
+VMLens Simple Setup
+===================
 
-Scope:
-- Local laptop/PC runs Docker dashboard, control-plane, and database.
+Goal:
+- Local laptop runs dashboard, backend, and database with Docker.
 - Cloud VMs run the VMLens agent.
-- Agent uses prebuilt release v2.7, so VM does not need git clone or compile.
-- Reverse SSH tunnel connects VM agent to local backend.
+- VM agent uses release v2.7 prebuilt binary.
+- VM does not need git clone or compile.
 
-Tested result:
+Architecture:
 
-Agent service VM removed first:
-10.20.20.130 => inactive, unit not-found
-10.20.20.199 => inactive, unit not-found
-
-Local Docker reset:
-agents => []
-vms => []
-stats => 0
-
-Local dashboard:
-http://127.0.0.1:8080/health => ok
-http://127.0.0.1:3000 => 200
-
-Tunnel:
-10.20.20.130 => running
-10.20.20.199 => running
-
-Agent prebuilt v2.7:
-10.20.20.130 => active
-10.20.20.199 => active
-
-Backend:
-2 VMs online
-
-Traffic test:
-10.20.20.130 -> 10.20.20.199:8081
-20 requests
-20 status=200
-
-Stats increased:
-internal_flows: 4 -> 50
-network_requests_total: 0 -> 31
+Cloud VM agent -> reverse SSH tunnel -> local backend -> dashboard
 
 
-1. Reset VM agent
-=================
-
-Run on each VM:
-
-sudo systemctl stop vmlens-agent 2>/dev/null || true
-sudo systemctl disable vmlens-agent 2>/dev/null || true
-sudo rm -f /etc/systemd/system/vmlens-agent.service
-sudo rm -f /usr/local/bin/vmlens-agent
-sudo rm -f /etc/vmlens/agent.env
-sudo rm -f /usr/lib/vmlens/flow_tracker.bpf.o
-sudo systemctl daemon-reload
-
-Check:
-
-systemctl is-active vmlens-agent 2>/dev/null || true
-systemctl is-enabled vmlens-agent 2>/dev/null || true
-
-Expected:
-
-inactive
-not-found
-
-
-2. Local: clean VMLens Docker
-=============================
-
-Run on local:
-
-docker compose down -v --remove-orphans
-
-docker ps -aq --filter "name=vmlens" | xargs -r docker rm -f
-docker volume ls -q | grep -Ei "vmlens" | xargs -r docker volume rm
-docker image ls --format '{{.Repository}} {{.ID}}' \
-  | awk 'tolower($1) ~ /vmlens/ {print $2}' \
-  | sort -u \
-  | xargs -r docker image rm -f
-
-Check:
-
-docker ps -a --format '{{.ID}} {{.Names}} {{.Image}} {{.Status}}' | grep -i vmlens || true
-docker volume ls --format '{{.Name}}' | grep -i vmlens || true
-docker image ls --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep -i vmlens || true
-
-
-3. Local: build and start dashboard
-===================================
+1. Local: start dashboard
+=========================
 
 Run on local:
 
 docker compose up -d --build
 
-Check clean state:
+Check:
 
 curl http://127.0.0.1:8080/health
 curl http://127.0.0.1:8080/api/agents
 curl http://127.0.0.1:8080/api/vms
-curl http://127.0.0.1:8080/api/stats/summary
 
-Expected:
-
-/health => {"database":"ok","status":"ok",...}
-/api/agents => []
-/api/vms => []
-stats => total_vms=0, total_flows=0
-
-Open UI:
+Open:
 
 http://localhost:3000
 
 
-4. Local: start reverse SSH tunnel
-==================================
+2. Local: start tunnel to each VM
+=================================
 
 Run on local:
 
@@ -130,11 +46,10 @@ bash scripts/vmlens-tunnel.sh status 10.20.20.199 ~/.vmlens/keys/id_ed25519_vmle
 Expected:
 
 running
-running
 
 
-5. VM: check tunnel from inside VM
-==================================
+3. VM: check backend tunnel
+===========================
 
 Run on each VM:
 
@@ -145,8 +60,8 @@ Expected:
 {"database":"ok","status":"ok",...}
 
 
-6. VM: install agent from release v2.7
-======================================
+4. VM: install VMLens agent from release
+========================================
 
 Run on each VM:
 
@@ -177,8 +92,8 @@ registered agent=...
 eBPF collector loaded object=/usr/lib/vmlens/flow_tracker.bpf.o
 
 
-7. Local: verify agents and VMs
-===============================
+5. Local: verify VM nodes
+=========================
 
 Run on local:
 
@@ -188,23 +103,18 @@ curl http://127.0.0.1:8080/api/stats/summary
 
 Expected:
 
-2 agents online
-2 VMs online
-
-Example:
-
-testing-a-1 / 10.20.20.199 => online
-testing-a-2 / 10.20.20.130 => online
+agents online
+VMs online
 
 
-8. VM-to-VM traffic test
+6. Test VM-to-VM traffic
 ========================
 
-Server VM: 10.20.20.199
+Server VM, example 10.20.20.199:
 
 python3 -m http.server 8081 --bind 0.0.0.0
 
-Client VM: 10.20.20.130
+Client VM, example 10.20.20.130:
 
 python3 -c "import time, urllib.request
 for i in range(1, 21):
@@ -217,12 +127,11 @@ for i in range(1, 21):
 Expected:
 
 request=01 status=200
-request=02 status=200
 ...
 request=20 status=200
 
 
-9. Local: verify tracking
+7. Local: verify tracking
 =========================
 
 Run on local:
@@ -235,125 +144,60 @@ Expected:
 
 internal_flows increases
 network_requests_total increases
-internal activity shows:
+internal activity shows VM-to-VM communication
+
+Example:
 
 testing-a-2 (10.20.20.130) -> testing-a-1 (10.20.20.199):8081 tcp
 
 
-10. Stop test HTTP server
-=========================
+8. Stop
+=======
 
-If server was started in foreground, press:
-
-Ctrl + C
-
-If server was started in background:
-
-pkill -f "python3 -m http.server 8081" || true
-
-
-11. Stop agent
-==============
-
-Run on each VM:
+Stop agent on each VM:
 
 sudo systemctl stop vmlens-agent
 
-Check:
-
-systemctl is-active vmlens-agent
-
-Expected:
-
-inactive
-
-
-12. Stop tunnels
-================
-
-Run on local:
+Stop tunnels on local:
 
 bash scripts/vmlens-tunnel.sh stop 10.20.20.130 ~/.vmlens/keys/id_ed25519_vmlens
 bash scripts/vmlens-tunnel.sh stop 10.20.20.199 ~/.vmlens/keys/id_ed25519_vmlens
 
-Check:
-
-bash scripts/vmlens-tunnel.sh status 10.20.20.130 ~/.vmlens/keys/id_ed25519_vmlens
-bash scripts/vmlens-tunnel.sh status 10.20.20.199 ~/.vmlens/keys/id_ed25519_vmlens
-
-
-13. Stop local dashboard
-========================
-
-Run on local:
+Stop local dashboard:
 
 docker compose down
 
-Reset database too:
+Reset local database:
 
 docker compose down -v
 
 
-14. Useful troubleshooting
-==========================
+9. Clean reinstall
+==================
 
-If SSH host key changed:
+If you want to retry from zero, run on each VM:
 
-bash scripts/vmlens-tunnel.sh forget-host <VM_IP>
+sudo systemctl stop vmlens-agent 2>/dev/null || true
+sudo systemctl disable vmlens-agent 2>/dev/null || true
+sudo rm -f /etc/systemd/system/vmlens-agent.service
+sudo rm -f /usr/local/bin/vmlens-agent
+sudo rm -f /etc/vmlens/agent.env
+sudo rm -f /usr/lib/vmlens/flow_tracker.bpf.o
+sudo systemctl daemon-reload
 
-Example:
-
-bash scripts/vmlens-tunnel.sh forget-host 10.20.20.199
-
-If tunnel says remote port 18080 already used:
-
-Run inside VM:
-
-ss -ltnp | grep 18080 || true
-curl http://127.0.0.1:18080/health || true
-
-If health works, tunnel is already available.
-If health fails, stop stale SSH tunnel from local and start again.
-
-If client cannot reach server port 8081:
-
-Run from client VM:
-
-curl -v --connect-timeout 5 http://10.20.20.199:8081/
-
-Run from server VM:
-
-ss -lntp | grep 8081
-
-Expected:
-
-LISTEN ... 0.0.0.0:8081
-
-If curl timeout but SSH works, check OpenStack security group:
-
-Ingress
-Protocol: TCP
-Port: 8081
-Remote CIDR: 10.20.20.0/24
+Then repeat from step 1.
 
 
-15. Release v2.7 assets
-=======================
+10. Release assets
+==================
 
 Release:
 
 https://github.com/sonix03/vmlens-ebpf/releases/tag/v2.7
 
-Required assets:
+Assets used:
 
 vmlens-agent-linux-amd64
 flow_tracker-linux-amd64.bpf.o
 install-agent.sh
 SHA256SUMS
-
-This means VM install can use prebuilt mode and does not need:
-
-git clone
-go build
-clang build
-bpftool build step
