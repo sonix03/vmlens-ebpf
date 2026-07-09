@@ -248,7 +248,7 @@ run_for_all() {
     local selector="$1"
     resolve_vm "${selector}"
     echo "==> ${sub_action} ${vm_alias} (${vm_host})"
-    if ! VMLENS_CONFIG="${config_file}" "$0" "${sub_action}" "${vm_alias}"; then
+    if ! VMLENS_CONFIG="${config_file}" bash "$0" "${sub_action}" "${vm_alias}"; then
       failed=1
     fi
   }
