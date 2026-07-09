@@ -1,0 +1,59 @@
+#cloud-config
+package_update: true
+package_upgrade: false
+
+write_files:
+  - path: /usr/local/sbin/vmlens-bootstrap-prebuilt.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -Eeuxo pipefail
+
+      LOG_FILE="/var/log/vmlens-bootstrap.log"
+      exec > >(tee -a "$LOG_FILE") 2>&1
+      trap 'status=$?; echo "VMLens prebuilt bootstrap failed at line ${LINENO} with exit code ${status}"; exit ${status}' ERR
+
+      echo "VMLens prebuilt bootstrap started at $(date -Is)"
+      uname -a
+
+      BACKEND_URL="http://127.0.0.1:18080"
+      MOCK_MODE="false"
+      FLOW_INTERVAL="1s"
+      AGENT_IGNORE_IPS=""
+
+      RELEASE_BASE_URL="https://github.com/sonix03/vmlens-ebpf/releases/latest/download"
+      INSTALL_SCRIPT_URL="${RELEASE_BASE_URL}/install-agent.sh"
+
+      case "$(uname -m)" in
+        x86_64) ARCH="amd64" ;;
+        aarch64|arm64) ARCH="arm64" ;;
+        *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+      esac
+
+      AGENT_BINARY_URL="${RELEASE_BASE_URL}/vmlens-agent-linux-${ARCH}"
+      BPF_OBJECT_URL="${RELEASE_BASE_URL}/flow_tracker-linux-${ARCH}.bpf.o"
+
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y ca-certificates curl
+
+      [[ -r /sys/kernel/btf/vmlinux ]] || { echo "kernel BTF /sys/kernel/btf/vmlinux is required" >&2; exit 1; }
+
+      curl --fail --location --show-error --output /usr/local/sbin/vmlens-install-agent.sh "$INSTALL_SCRIPT_URL"
+      chmod 0755 /usr/local/sbin/vmlens-install-agent.sh
+
+      env \
+        INSTALL_MODE=prebuilt \
+        AGENT_BINARY_URL="$AGENT_BINARY_URL" \
+        BPF_OBJECT_URL="$BPF_OBJECT_URL" \
+        BACKEND_URL="$BACKEND_URL" \
+        MOCK_MODE="$MOCK_MODE" \
+        FLOW_INTERVAL="$FLOW_INTERVAL" \
+        AGENT_IGNORE_IPS="$AGENT_IGNORE_IPS" \
+        bash /usr/local/sbin/vmlens-install-agent.sh
+
+      systemctl is-active vmlens-agent
+      echo "VMLens prebuilt bootstrap finished at $(date -Is)"
+
+runcmd:
+  - [ bash, /usr/local/sbin/vmlens-bootstrap-prebuilt.sh ]

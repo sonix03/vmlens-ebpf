@@ -3,6 +3,7 @@
 /internal/ebpf/vmlinux.h
 /internal/ebpf/program.bpf.o
 /data/
+/dist/agent/
 *.log
 .env
 configs/local.env

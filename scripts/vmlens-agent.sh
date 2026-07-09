@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   echo "Usage: $0 start|stop|restart|status|logs"
-  echo "Env: BACKEND_URL=http://127.0.0.1:18080 MOCK_MODE=false FLOW_INTERVAL=1s"
+  echo "Env: BACKEND_URL=http://127.0.0.1:18080 MOCK_MODE=false FLOW_INTERVAL=1s INSTALL_MODE=auto|prebuilt|build"
 }
 
 action="${1:-}"
@@ -17,7 +17,7 @@ service_name="vmlens-agent"
 
 need_root() {
   if [[ ${EUID} -ne 0 ]]; then
-    exec sudo --preserve-env=BACKEND_URL,MOCK_MODE,TENANT_ID,AGENT_PRIVATE_IPS,AGENT_PUBLIC_IP,AGENT_IGNORE_IPS,AGENT_ENVIRONMENT,FLOW_INTERVAL "$0" "$@"
+    exec sudo --preserve-env=BACKEND_URL,MOCK_MODE,TENANT_ID,AGENT_PRIVATE_IPS,AGENT_PUBLIC_IP,AGENT_IGNORE_IPS,AGENT_ENVIRONMENT,FLOW_INTERVAL,INSTALL_MODE,AGENT_BINARY_URL,AGENT_BINARY_PATH,BPF_OBJECT_URL,BPF_OBJECT_PATH "$0" "$@"
   fi
 }
 

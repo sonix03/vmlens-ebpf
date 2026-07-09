@@ -1,9 +1,31 @@
 # VMLens OpenStack Customization Script
 
-Upload this file when creating an OpenStack instance:
+Use one of these files when creating an OpenStack instance.
+
+## Option A: build on the VM
+
+Use this when the VM is allowed to install Go, clang, libbpf-dev, and compile
+the agent during boot:
 
 ```text
 configuration/openstack-vmlens-cloud-init.yaml
+```
+
+## Option B: install prebuilt release artifacts
+
+Use this when GitHub Release already has precompiled assets:
+
+```text
+configuration/openstack-vmlens-prebuilt-cloud-init.yaml
+```
+
+Required release assets:
+
+```text
+vmlens-agent-linux-amd64
+flow_tracker-linux-amd64.bpf.o
+install-agent.sh
+SHA256SUMS
 ```
 
 OpenStack field:
@@ -39,10 +61,17 @@ Run bootstrap manually again if needed:
 sudo bash /usr/local/sbin/vmlens-bootstrap.sh
 ```
 
+For prebuilt mode:
+
+```bash
+sudo bash /usr/local/sbin/vmlens-bootstrap-prebuilt.sh
+```
+
 Editable values inside the YAML:
 
 ```text
 REPO_URL
+RELEASE_BASE_URL
 BACKEND_URL
 FLOW_INTERVAL
 AGENT_IGNORE_IPS
