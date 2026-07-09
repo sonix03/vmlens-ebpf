@@ -37,7 +37,16 @@ jobs:
 
       - name: Build precompiled agent artifacts
         run: |
-          VERSION="${GITHUB_REF_NAME:-dev}" TARGET_ARCHES="amd64" CLANG_BIN=clang-18 bash scripts/build-agent-release.sh
+          set -euxo pipefail
+          go version
+          go env GOVERSION GOPATH GOMODCACHE
+          command -v clang-18
+          clang-18 --version
+          clang-18 -print-targets | grep -E '^[[:space:]]*bpf[[:space:]]' || true
+          command -v bpftool
+          bpftool version
+          ls -l /sys/kernel/btf/vmlinux /usr/include/bpf/bpf_helpers.h
+          VERSION="${GITHUB_REF_NAME:-dev}" TARGET_ARCHES="amd64" CLANG_BIN=clang-18 bash -x scripts/build-agent-release.sh
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
