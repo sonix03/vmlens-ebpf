@@ -123,6 +123,19 @@ bash scripts/vmlens-tunnel.sh start testing-a-1
 bash scripts/vmlens-tunnel.sh start <VM_IP_OR_HOST>
 ```
 
+Use an explicit SSH key:
+
+```bash
+bash scripts/vmlens-tunnel.sh start <VM_IP_OR_HOST> ~/.vmlens/keys/id_ed25519_vmlens
+bash scripts/vmlens-tunnel.sh stop <VM_IP_OR_HOST> ~/.vmlens/keys/id_ed25519_vmlens
+```
+
+Remove stale SSH host key after a VM IP is reused:
+
+```bash
+bash scripts/vmlens-tunnel.sh forget-host <VM_IP_OR_HOST>
+```
+
 Example:
 
 ```bash

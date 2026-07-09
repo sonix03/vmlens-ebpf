@@ -1,0 +1,341 @@
+VMLens Setup From Zero
+======================
+
+Goal:
+- Laptop/local runs dashboard, control-plane API, and database.
+- OpenStack VMs run vmlens-agent.
+- Reverse SSH tunnel connects each VM agent to local backend.
+- VM-to-VM traffic appears in localhost frontend.
+
+
+1. LOCAL LAPTOP: CLONE REPOSITORY
+---------------------------------
+
+Run in WSL/bash:
+
+git clone https://github.com/sonix03/vmlens-ebpf.git
+cd vmlens-ebpf
+
+
+2. LOCAL LAPTOP: START DASHBOARD
+--------------------------------
+
+docker compose up -d --build
+
+Check:
+
+curl http://127.0.0.1:8080/health
+curl http://127.0.0.1:8080/api/agents
+curl http://127.0.0.1:8080/api/vms
+
+Open frontend:
+
+http://localhost:3000
+
+
+3. LOCAL LAPTOP: PREPARE SSH KEY
+--------------------------------
+
+Recommended: copy Windows SSH key into WSL-safe path.
+
+mkdir -p ~/.vmlens/keys
+cp /mnt/c/Users/<WINDOWS_USER>/.ssh/id_ed25519_vmlens ~/.vmlens/keys/id_ed25519_vmlens
+chmod 600 ~/.vmlens/keys/id_ed25519_vmlens
+
+Check:
+
+ls -l ~/.vmlens/keys/id_ed25519_vmlens
+
+
+4. LOCAL LAPTOP: CONFIGURE VM LIST
+----------------------------------
+
+cp configs/local.env.example configs/local.env
+
+Edit:
+
+nano configs/local.env
+
+Example:
+
+VMLENS_SSH_USER=ubuntu
+VMLENS_SSH_KEY=~/.vmlens/keys/id_ed25519_vmlens
+
+VMLENS_LOCAL_BACKEND=127.0.0.1:8080
+VMLENS_REMOTE_BACKEND=127.0.0.1:18080
+
+VMLENS_VM_PROFILES="testing_a_1 testing_a_2 testing_a_3"
+
+VMLENS_VM_TESTING_A_1_ALIAS=testing-a-1
+VMLENS_VM_TESTING_A_1_HOST=10.20.20.130
+VMLENS_VM_TESTING_A_1_SSH_USER=-
+VMLENS_VM_TESTING_A_1_SSH_KEY=-
+
+VMLENS_VM_TESTING_A_2_ALIAS=testing-a-2
+VMLENS_VM_TESTING_A_2_HOST=10.20.20.199
+VMLENS_VM_TESTING_A_2_SSH_USER=-
+VMLENS_VM_TESTING_A_2_SSH_KEY=-
+
+VMLENS_VM_TESTING_A_3_ALIAS=testing-a-3
+VMLENS_VM_TESTING_A_3_HOST=10.20.20.167
+VMLENS_VM_TESTING_A_3_SSH_USER=-
+VMLENS_VM_TESTING_A_3_SSH_KEY=-
+
+Check configured VMs:
+
+bash scripts/vmlens-tunnel.sh list
+
+
+5. OPENSTACK: CUSTOMIZATION SCRIPT
+----------------------------------
+
+When creating each VM in OpenStack:
+
+Customization Script -> Load Customization Script from file
+
+Upload:
+
+configuration/openstack-vmlens-cloud-init.yaml
+
+Or copy-paste this content into Customization Script:
+
+#cloud-config
+package_update: true
+package_upgrade: false
+
+write_files:
+  - path: /usr/local/sbin/vmlens-bootstrap.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -Eeuxo pipefail
+
+      LOG_FILE="/var/log/vmlens-bootstrap.log"
+      exec > >(tee -a "$LOG_FILE") 2>&1
+      trap 'status=$?; echo "VMLens bootstrap failed at line ${LINENO} with exit code ${status}"; exit ${status}' ERR
+
+      echo "VMLens bootstrap started at $(date -Is)"
+      uname -a
+
+      REPO_URL="https://github.com/sonix03/vmlens-ebpf.git"
+      REPO_DIR="/opt/vmlens-ebpf"
+
+      BACKEND_URL="http://127.0.0.1:18080"
+      MOCK_MODE="false"
+      FLOW_INTERVAL="1s"
+
+      # Optional. Add local/tunnel/control-plane IPs here if they should not be tracked.
+      # Example: AGENT_IGNORE_IPS="10.20.20.125"
+      AGENT_IGNORE_IPS=""
+
+      export DEBIAN_FRONTEND=noninteractive
+      export HOME="/root"
+      export GOPATH="/root/go"
+      export GOMODCACHE="/root/go/pkg/mod"
+      export GOCACHE="/root/.cache/go-build"
+      mkdir -p "$GOMODCACHE" "$GOCACHE"
+
+      apt-get update
+      apt-get install -y ca-certificates git golang-go clang libbpf-dev linux-tools-common
+
+      apt-get install -y "linux-tools-$(uname -r)" || true
+      apt-get install -y bpftool || true
+
+      if ! command -v bpftool >/dev/null 2>&1; then
+        BPFTOOL_PATH="$(find /usr/lib/linux-tools* -name bpftool -type f 2>/dev/null | head -n1 || true)"
+        if [ -n "$BPFTOOL_PATH" ]; then
+          ln -sf "$BPFTOOL_PATH" /usr/local/bin/bpftool
+        fi
+      fi
+
+      command -v bpftool >/dev/null
+      test -r /sys/kernel/btf/vmlinux
+
+      rm -rf "$REPO_DIR"
+      git clone "$REPO_URL" "$REPO_DIR"
+
+      cd "$REPO_DIR"
+      find scripts -type f -name "*.sh" -exec chmod +x {} \;
+
+      env \
+        BACKEND_URL="$BACKEND_URL" \
+        MOCK_MODE="$MOCK_MODE" \
+        FLOW_INTERVAL="$FLOW_INTERVAL" \
+        AGENT_IGNORE_IPS="$AGENT_IGNORE_IPS" \
+        HOME="$HOME" \
+        GOPATH="$GOPATH" \
+        GOMODCACHE="$GOMODCACHE" \
+        GOCACHE="$GOCACHE" \
+        bash scripts/vmlens-agent.sh start
+
+      systemctl is-active vmlens-agent
+      echo "VMLens bootstrap finished at $(date -Is)"
+
+runcmd:
+  - [ bash, /usr/local/sbin/vmlens-bootstrap.sh ]
+
+
+6. CLOUD VM: CHECK CLOUD-INIT AND AGENT
+---------------------------------------
+
+SSH into the VM:
+
+ssh -i ~/.vmlens/keys/id_ed25519_vmlens ubuntu@<VM_IP>
+
+Wait until cloud-init is done:
+
+sudo cloud-init status --wait
+sudo cloud-init status --long
+
+Check installation:
+
+ls -la /opt
+ls -la /opt/vmlens-ebpf
+
+Check logs:
+
+sudo tail -n 120 /var/log/cloud-init-output.log
+sudo tail -n 120 /var/log/vmlens-bootstrap.log
+
+Check agent:
+
+sudo systemctl status vmlens-agent --no-pager
+sudo journalctl -u vmlens-agent -n 50 --no-pager
+
+
+7. LOCAL LAPTOP: START TUNNEL
+-----------------------------
+
+Start one VM:
+
+bash scripts/vmlens-tunnel.sh start <VM_IP> ~/.vmlens/keys/id_ed25519_vmlens
+
+Examples:
+
+bash scripts/vmlens-tunnel.sh start 10.20.20.130 ~/.vmlens/keys/id_ed25519_vmlens
+bash scripts/vmlens-tunnel.sh start 10.20.20.199 ~/.vmlens/keys/id_ed25519_vmlens
+bash scripts/vmlens-tunnel.sh start 10.20.20.167 ~/.vmlens/keys/id_ed25519_vmlens
+
+Or start all configured VMs:
+
+bash scripts/vmlens-tunnel.sh start-all
+
+Check:
+
+bash scripts/vmlens-tunnel.sh status-all
+curl http://127.0.0.1:8080/api/agents
+curl http://127.0.0.1:8080/api/vms
+
+
+8. CLOUD VM: CHECK TUNNEL FROM INSIDE VM
+----------------------------------------
+
+Run inside each VM:
+
+curl http://127.0.0.1:18080/health
+
+Expected:
+
+{"database":"ok","status":"ok"}
+
+If agent was started before tunnel, wait 30 seconds or restart:
+
+sudo systemctl restart vmlens-agent
+sudo systemctl status vmlens-agent --no-pager
+
+
+9. TEST VM-TO-VM CLIENT SERVER
+------------------------------
+
+Server VM, example testing-a-2 / 10.20.20.199:
+
+pkill -f "python3 -m http.server 8081" || true
+python3 -m http.server 8081 --bind 0.0.0.0
+
+Client VM, example testing-a-1 or testing-a-3:
+
+python3 -c "import time, urllib.request; [print('request=%02d status=%s' % (i, urllib.request.urlopen('http://10.20.20.199:8081/', timeout=5).status)) or time.sleep(0.5) for i in range(1,21)]"
+
+Check local frontend:
+
+http://localhost:3000
+
+Check backend:
+
+curl http://127.0.0.1:8080/api/graph
+curl 'http://127.0.0.1:8080/api/internal/activity?limit=20'
+curl http://127.0.0.1:8080/api/stats/summary
+
+
+10. IF VM IP WAS REUSED: FIX KNOWN_HOSTS
+----------------------------------------
+
+If SSH shows:
+
+WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED
+
+Run:
+
+bash scripts/vmlens-tunnel.sh forget-host <VM_IP>
+
+Example:
+
+bash scripts/vmlens-tunnel.sh forget-host 10.20.20.199
+
+Then start tunnel again:
+
+bash scripts/vmlens-tunnel.sh start 10.20.20.199 ~/.vmlens/keys/id_ed25519_vmlens
+
+
+11. IF CLIENT CANNOT REACH SERVER PORT 8081
+-------------------------------------------
+
+From client VM:
+
+curl -v --connect-timeout 5 http://10.20.20.199:8081/
+
+From server VM:
+
+ss -lntp | grep 8081
+
+Expected:
+
+LISTEN ... 0.0.0.0:8081
+
+If curl timeout but SSH port 22 works, fix OpenStack security group:
+
+Ingress
+Protocol: TCP
+Port: 8081
+Remote CIDR: 10.20.20.0/24
+
+Or only one VM:
+
+Remote CIDR: <CLIENT_VM_IP>/32
+
+
+12. STOP
+--------
+
+Stop one tunnel:
+
+bash scripts/vmlens-tunnel.sh stop <VM_IP> ~/.vmlens/keys/id_ed25519_vmlens
+
+Stop all tunnels:
+
+bash scripts/vmlens-tunnel.sh stop-all
+
+Stop local dashboard:
+
+docker compose down
+
+Stop VM agent:
+
+sudo systemctl stop vmlens-agent
+
+
+13. RESET LOCAL DATABASE
+------------------------
+
+docker compose down -v
+docker compose up -d --build

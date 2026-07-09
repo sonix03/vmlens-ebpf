@@ -126,6 +126,19 @@ bash scripts/vmlens-tunnel.sh start <VM_A_PUBLIC_IP>
 bash scripts/vmlens-tunnel.sh start <VM_B_PUBLIC_IP>
 ```
 
+Use an explicit key when needed:
+
+```bash
+bash scripts/vmlens-tunnel.sh start <VM_IP> ~/.vmlens/keys/id_ed25519_vmlens
+bash scripts/vmlens-tunnel.sh stop <VM_IP> ~/.vmlens/keys/id_ed25519_vmlens
+```
+
+If a VM IP was reused and SSH reports a changed host key:
+
+```bash
+bash scripts/vmlens-tunnel.sh forget-host <VM_IP>
+```
+
 Or configure the VM list and SSH keys once:
 
 ```bash

@@ -13,8 +13,9 @@ usage() {
 Usage:
   $0 list
   $0 show <vm-alias-or-host>
-  $0 start|stop|restart|status <vm-alias-or-host>
+  $0 start|stop|restart|status <vm-alias-or-host> [ssh-key|agent|none]
   $0 start-all|stop-all|restart-all|status-all
+  $0 forget-host <vm-alias-or-host>
 
 Config:
   VMLENS_CONFIG=${config_file}
@@ -31,6 +32,7 @@ EOF
 
 action="${1:-}"
 vm_host="${2:-}"
+key_arg="${3:-}"
 if [[ -z "${action}" ]]; then
   usage >&2
   exit 1
@@ -254,6 +256,29 @@ run_for_all() {
   return "${failed}"
 }
 
+forget_known_host() {
+  local selector="$1"
+  resolve_vm "${selector}"
+
+  local known_hosts_file="${HOME}/.ssh/known_hosts"
+  if [[ ! -f "${known_hosts_file}" ]]; then
+    echo "known_hosts not found: ${known_hosts_file}"
+    return 0
+  fi
+
+  local entry seen_entries=" "
+  for entry in "${selector}" "${vm_host}" "${vm_alias}"; do
+    [[ -z "${entry}" ]] && continue
+    if [[ "${seen_entries}" == *" ${entry} "* ]]; then
+      continue
+    fi
+    seen_entries="${seen_entries}${entry} "
+    ssh-keygen -f "${known_hosts_file}" -R "${entry}" || true
+  done
+
+  echo "Removed known_hosts entries for ${vm_alias} (${vm_host}) from ${known_hosts_file}"
+}
+
 case "${action}" in
   list) list_vms; exit $? ;;
   show)
@@ -264,6 +289,14 @@ case "${action}" in
     printf '%-16s %-16s %-10s %-58s %-22s %-22s\n' "ALIAS" "HOST" "USER" "KEY" "REMOTE_BACKEND" "LOCAL_BACKEND"
     print_vm_row "${vm_host}"
     exit $?
+    ;;
+  forget-host)
+    if [[ -z "${vm_host}" ]]; then
+      usage >&2
+      exit 1
+    fi
+    forget_known_host "${vm_host}"
+    exit 0
     ;;
   start-all) run_for_all start; exit $? ;;
   stop-all) run_for_all stop; exit $? ;;
@@ -277,6 +310,9 @@ if [[ -z "${vm_host}" ]]; then
 fi
 
 resolve_vm "${vm_host}"
+if [[ -n "${key_arg}" ]]; then
+  ssh_key="${key_arg}"
+fi
 ssh_key="$(prepare_ssh_key "${ssh_key}")"
 safe_host="${vm_host//[^A-Za-z0-9_.-]/_}"
 control_path="${state_dir}/${ssh_user}_${safe_host}.ctl"
