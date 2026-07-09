@@ -9,6 +9,18 @@ Customization Script
 OpenStack calls this feature `Customization Script`. It is the same idea as
 `User Data` or `cloud-init` in other clouds.
 
+If you want to upload a file instead of copy-pasting, use:
+
+```text
+configuration/openstack-vmlens-cloud-init.yaml
+```
+
+In OpenStack:
+
+```text
+Customization Script -> Load Customization Script from file
+```
+
 ## OpenStack Customization Script
 
 ```yaml
@@ -211,6 +223,20 @@ Check service status:
 
 ```bash
 sudo systemctl status vmlens-agent --no-pager
+```
+
+If the service does not exist, check the cloud-init/bootstrap logs:
+
+```bash
+sudo cloud-init status --long
+sudo tail -n 200 /var/log/cloud-init-output.log
+sudo tail -n 200 /var/log/vmlens-bootstrap.log
+```
+
+Run the bootstrap manually again:
+
+```bash
+sudo bash /usr/local/sbin/vmlens-bootstrap.sh
 ```
 
 Follow logs:
