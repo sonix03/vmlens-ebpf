@@ -32,12 +32,11 @@ jobs:
             sudo ln -sf "$BPFTOOL_PATH" /usr/local/bin/bpftool
           fi
           hash -r
-          command -v bpftool
-          if ! bpftool version; then
+          command -v bpftool || true
+          if command -v bpftool >/dev/null 2>&1 && ! bpftool version; then
             find /usr/lib -path '*linux*tools*' -name bpftool -type f -executable 2>/dev/null || true
-            exit 1
           fi
-          test -r /sys/kernel/btf/vmlinux
+          test -r /sys/kernel/btf/vmlinux || true
 
       - name: Build precompiled agent artifacts
         run: |
@@ -47,9 +46,10 @@ jobs:
           command -v clang-18
           clang-18 --version
           clang-18 -print-targets | grep -E '^[[:space:]]*bpf[[:space:]]' || true
-          command -v bpftool
-          bpftool version
-          ls -l /sys/kernel/btf/vmlinux /usr/include/bpf/bpf_helpers.h
+          command -v bpftool || true
+          bpftool version || true
+          ls -l /usr/include/bpf/bpf_helpers.h agent/ebpf/vmlinux_fallback.h
+          ls -l /sys/kernel/btf/vmlinux || true
           VERSION="${GITHUB_REF_NAME:-dev}" TARGET_ARCHES="amd64" CLANG_BIN=clang-18 bash -x scripts/build-agent-release.sh
 
       - name: Upload workflow artifact

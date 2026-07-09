@@ -33,15 +33,25 @@ else
     bpftool_bin="${bpftool_path}"
   fi
 fi
-[[ -n "${bpftool_bin}" ]] || { echo "bpftool is required" >&2; exit 1; }
-[[ -r /sys/kernel/btf/vmlinux ]] || { echo "kernel BTF /sys/kernel/btf/vmlinux is required" >&2; exit 1; }
 [[ -r /usr/include/bpf/bpf_helpers.h ]] || { echo "libbpf-dev is required: missing /usr/include/bpf/bpf_helpers.h" >&2; exit 1; }
 
 mkdir -p "${out_dir}"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "${tmp_dir}"' EXIT
 
-"${bpftool_bin}" btf dump file /sys/kernel/btf/vmlinux format c >"${tmp_dir}/vmlinux.h"
+fallback_vmlinux="${repo_dir}/agent/ebpf/vmlinux_fallback.h"
+if [[ -n "${VMLINUX_HEADER:-}" ]]; then
+  [[ -r "${VMLINUX_HEADER}" ]] || { echo "VMLINUX_HEADER is not readable: ${VMLINUX_HEADER}" >&2; exit 1; }
+  cp "${VMLINUX_HEADER}" "${tmp_dir}/vmlinux.h"
+elif [[ -n "${bpftool_bin}" && -r /sys/kernel/btf/vmlinux ]]; then
+  "${bpftool_bin}" btf dump file /sys/kernel/btf/vmlinux format c >"${tmp_dir}/vmlinux.h"
+elif [[ -r "${fallback_vmlinux}" ]]; then
+  echo "using fallback vmlinux header: ${fallback_vmlinux}" >&2
+  cp "${fallback_vmlinux}" "${tmp_dir}/vmlinux.h"
+else
+  echo "bpftool plus kernel BTF, VMLINUX_HEADER, or ${fallback_vmlinux} is required" >&2
+  exit 1
+fi
 
 for arch in ${target_arches}; do
   case "${arch}" in
