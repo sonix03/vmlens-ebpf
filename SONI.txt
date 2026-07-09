@@ -78,15 +78,11 @@ bash scripts/vmlens-tunnel.sh list
 5. OPENSTACK: CUSTOMIZATION SCRIPT
 ----------------------------------
 
-When creating each VM in OpenStack:
-
-Customization Script -> Load Customization Script from file
-
 Upload:
 
 configuration/openstack-vmlens-cloud-init.yaml
 
-Or copy-paste this content into Customization Script:
+Or copy-paste:
 
 #cloud-config
 package_update: true
