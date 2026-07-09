@@ -16,6 +16,7 @@ if ! command -v bpftool >/dev/null 2>&1; then
 fi
 command -v bpftool >/dev/null || { echo "bpftool is required" >&2; exit 1; }
 [[ -r /sys/kernel/btf/vmlinux ]] || { echo "kernel BTF /sys/kernel/btf/vmlinux is required" >&2; exit 1; }
+[[ -r /usr/include/bpf/bpf_helpers.h ]] || { echo "libbpf-dev is required: missing /usr/include/bpf/bpf_helpers.h" >&2; exit 1; }
 
 mkdir -p "${out_dir}"
 tmp_dir="$(mktemp -d)"

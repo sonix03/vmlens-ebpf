@@ -24,7 +24,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm linux-tools-common
+          sudo apt-get install -y clang llvm libbpf-dev linux-tools-common
           sudo apt-get install -y "linux-tools-$(uname -r)" || true
           if ! command -v bpftool >/dev/null 2>&1; then
             BPFTOOL_PATH="$(find /usr/lib/linux-tools* -name bpftool -type f 2>/dev/null | head -n1 || true)"
