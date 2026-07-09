@@ -26,13 +26,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-18 llvm-18 libbpf-dev linux-tools-common
           sudo apt-get install -y "linux-tools-$(uname -r)" || true
-          if ! command -v bpftool >/dev/null 2>&1; then
-            BPFTOOL_PATH="$(find /usr/lib/linux-tools* -name bpftool -type f 2>/dev/null | head -n1 || true)"
-            if [ -n "$BPFTOOL_PATH" ]; then
-              sudo ln -sf "$BPFTOOL_PATH" /usr/local/bin/bpftool
-            fi
+          BPFTOOL_PATH="$(find /usr/lib/linux-tools* -name bpftool -type f -executable 2>/dev/null | sort -Vr | head -n1 || true)"
+          if [ -n "$BPFTOOL_PATH" ]; then
+            sudo ln -sf "$BPFTOOL_PATH" /usr/local/bin/bpftool
           fi
           command -v bpftool
+          bpftool version
           test -r /sys/kernel/btf/vmlinux
 
       - name: Build precompiled agent artifacts

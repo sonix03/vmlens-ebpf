@@ -24,13 +24,16 @@ fi
   echo "${clang_bin} does not support the bpf target" >&2
   exit 1
 }
-if ! command -v bpftool >/dev/null 2>&1; then
-  bpftool_path="$(find /usr/lib/linux-tools* -name bpftool -type f 2>/dev/null | head -n1 || true)"
+bpftool_bin=""
+if command -v bpftool >/dev/null 2>&1 && bpftool version >/dev/null 2>&1; then
+  bpftool_bin="$(command -v bpftool)"
+else
+  bpftool_path="$(find /usr/lib/linux-tools* -name bpftool -type f -executable 2>/dev/null | sort -Vr | head -n1 || true)"
   if [[ -n "${bpftool_path}" ]]; then
-    export PATH="$(dirname "${bpftool_path}"):${PATH}"
+    bpftool_bin="${bpftool_path}"
   fi
 fi
-command -v bpftool >/dev/null || { echo "bpftool is required" >&2; exit 1; }
+[[ -n "${bpftool_bin}" ]] || { echo "bpftool is required" >&2; exit 1; }
 [[ -r /sys/kernel/btf/vmlinux ]] || { echo "kernel BTF /sys/kernel/btf/vmlinux is required" >&2; exit 1; }
 [[ -r /usr/include/bpf/bpf_helpers.h ]] || { echo "libbpf-dev is required: missing /usr/include/bpf/bpf_helpers.h" >&2; exit 1; }
 
@@ -38,7 +41,7 @@ mkdir -p "${out_dir}"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "${tmp_dir}"' EXIT
 
-bpftool btf dump file /sys/kernel/btf/vmlinux format c >"${tmp_dir}/vmlinux.h"
+"${bpftool_bin}" btf dump file /sys/kernel/btf/vmlinux format c >"${tmp_dir}/vmlinux.h"
 
 for arch in ${target_arches}; do
   case "${arch}" in
