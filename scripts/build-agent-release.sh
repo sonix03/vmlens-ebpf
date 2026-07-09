@@ -28,7 +28,7 @@ bpftool_bin=""
 if command -v bpftool >/dev/null 2>&1 && bpftool version >/dev/null 2>&1; then
   bpftool_bin="$(command -v bpftool)"
 else
-  bpftool_path="$(find /usr/lib/linux-tools* -name bpftool -type f -executable 2>/dev/null | sort -Vr | head -n1 || true)"
+  bpftool_path="$(find /usr/lib -path '*linux*tools*' -name bpftool -type f -executable 2>/dev/null | sort -Vr | head -n1 || true)"
   if [[ -n "${bpftool_path}" ]]; then
     bpftool_bin="${bpftool_path}"
   fi

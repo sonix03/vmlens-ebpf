@@ -25,13 +25,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-18 llvm-18 libbpf-dev linux-tools-common
-          sudo apt-get install -y "linux-tools-$(uname -r)" || true
-          BPFTOOL_PATH="$(find /usr/lib/linux-tools* -name bpftool -type f -executable 2>/dev/null | sort -Vr | head -n1 || true)"
+          sudo apt-get install -y "linux-tools-$(uname -r)" "linux-cloud-tools-$(uname -r)" || true
+          sudo apt-get install -y linux-tools-azure linux-cloud-tools-azure || true
+          BPFTOOL_PATH="$(find /usr/lib -path '*linux*tools*' -name bpftool -type f -executable 2>/dev/null | sort -Vr | head -n1 || true)"
           if [ -n "$BPFTOOL_PATH" ]; then
             sudo ln -sf "$BPFTOOL_PATH" /usr/local/bin/bpftool
           fi
+          hash -r
           command -v bpftool
-          bpftool version
+          if ! bpftool version; then
+            find /usr/lib -path '*linux*tools*' -name bpftool -type f -executable 2>/dev/null || true
+            exit 1
+          fi
           test -r /sys/kernel/btf/vmlinux
 
       - name: Build precompiled agent artifacts
