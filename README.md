@@ -8,9 +8,6 @@
   <a href="https://github.com/sonix03/vmlens-ebpf/releases/tag/v2.7">
     <img alt="Release" src="https://img.shields.io/badge/release-v2.7-3FAB48?style=for-the-badge">
   </a>
-  <a href="./LICENSE">
-    <img alt="License" src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge">
-  </a>
   <img alt="Go" src="https://img.shields.io/badge/Go-1.22-00ADD8?style=for-the-badge&logo=go&logoColor=white">
   <img alt="React" src="https://img.shields.io/badge/React-TypeScript-61DAFB?style=for-the-badge&logo=react&logoColor=111">
   <img alt="eBPF" src="https://img.shields.io/badge/eBPF-network%20telemetry-purple?style=for-the-badge">
@@ -391,7 +388,3 @@ ingest authorization.
 - [INSTRUCTION.md](./INSTRUCTION.md) — communication test catalog.
 - [docs/prebuilt-agent.md](./docs/prebuilt-agent.md) — release artifact flow.
 - [docs/privacy.md](./docs/privacy.md) — privacy boundary.
-
-## License
-
-MIT. See [LICENSE](./LICENSE).
