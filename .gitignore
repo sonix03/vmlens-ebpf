@@ -15,4 +15,4 @@ agent/ebpf/*.o
 SCRIPT.md
 INSTRUCTION.md
 SETUP.md
-SONI.md
+SONI.txt

@@ -1,13 +1,6 @@
 VMLens Setup From Zero
 ======================
 
-Goal:
-- Laptop/local runs dashboard, control-plane API, and database.
-- OpenStack VMs run vmlens-agent.
-- Reverse SSH tunnel connects each VM agent to local backend.
-- VM-to-VM traffic appears in localhost frontend.
-
-
 1. LOCAL LAPTOP: CLONE REPOSITORY
 ---------------------------------
 
@@ -15,10 +8,6 @@ Run in WSL/bash:
 
 git clone https://github.com/sonix03/vmlens-ebpf.git
 cd vmlens-ebpf
-
-
-2. LOCAL LAPTOP: START DASHBOARD
---------------------------------
 
 docker compose up -d --build
 
