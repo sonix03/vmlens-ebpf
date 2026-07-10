@@ -5,12 +5,28 @@ import (
 	"net/netip"
 )
 
+const (
+	ScopeInternalSameTenant  = "internal_same_tenant"
+	ScopeInternalCrossTenant = "internal_cross_tenant"
+	ScopeUnknownInternal     = "unknown_internal"
+	ScopeExternalPublic      = "external_public"
+	ScopeExternalPrivate     = "external_private"
+	ScopeUnknown             = "unknown"
+)
+
 type Classifier struct {
-	prefixes []netip.Prefix
+	prefixes                  []netip.Prefix
+	unregisteredInternalScope string
 }
 
-func NewClassifier(cidrs []string) (*Classifier, error) {
-	c := &Classifier{}
+func NewClassifier(cidrs []string, unregisteredInternalScope string) (*Classifier, error) {
+	if unregisteredInternalScope == "" {
+		unregisteredInternalScope = ScopeExternalPrivate
+	}
+	if unregisteredInternalScope != ScopeExternalPrivate && unregisteredInternalScope != ScopeUnknownInternal {
+		return nil, fmt.Errorf("unsupported unregistered internal scope %q", unregisteredInternalScope)
+	}
+	c := &Classifier{unregisteredInternalScope: unregisteredInternalScope}
 	for _, cidr := range cidrs {
 		prefix, err := netip.ParsePrefix(cidr)
 		if err != nil {
@@ -21,7 +37,7 @@ func NewClassifier(cidrs []string) (*Classifier, error) {
 	return c, nil
 }
 
-func (c *Classifier) IsInternal(ip string) bool {
+func (c *Classifier) IsConfiguredInternal(ip string) bool {
 	addr, err := netip.ParseAddr(ip)
 	if err != nil {
 		return false
@@ -34,18 +50,26 @@ func (c *Classifier) IsInternal(ip string) bool {
 	return false
 }
 
+func (c *Classifier) IsInternal(ip string) bool {
+	return c.IsConfiguredInternal(ip)
+}
+
 func (c *Classifier) Scope(sourceTenant, destinationTenant string, destinationRegistered bool, dstIP string) string {
 	if destinationRegistered {
 		if sourceTenant == destinationTenant {
-			return "internal_same_tenant"
+			return ScopeInternalSameTenant
 		}
-		return "internal_cross_tenant"
+		return ScopeInternalCrossTenant
 	}
-	if c.IsInternal(dstIP) {
-		return "unknown_internal"
+	addr, err := netip.ParseAddr(dstIP)
+	if err != nil || !addr.IsValid() {
+		return ScopeUnknown
 	}
-	if addr, err := netip.ParseAddr(dstIP); err == nil && addr.IsValid() {
-		return "external_public"
+	if c.IsConfiguredInternal(dstIP) {
+		return c.unregisteredInternalScope
 	}
-	return "unknown"
+	if addr.IsPrivate() || addr.IsLoopback() || addr.IsLinkLocalUnicast() {
+		return ScopeExternalPrivate
+	}
+	return ScopeExternalPublic
 }

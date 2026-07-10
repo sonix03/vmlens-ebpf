@@ -36,7 +36,7 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
-	classifier, err := service.NewClassifier(cfg.InternalCIDRs)
+	classifier, err := service.NewClassifier(cfg.InternalCIDRs, cfg.UnregisteredInternalScope)
 	if err != nil {
 		return err
 	}
