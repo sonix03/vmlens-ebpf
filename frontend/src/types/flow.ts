@@ -3,6 +3,7 @@ export type FlowScope =
   | 'internal_cross_tenant'
   | 'unknown_internal'
   | 'external_public'
+  | 'external_private'
   | 'unknown'
 
 export interface Flow {

@@ -42,6 +42,27 @@ VMLens tracks relationship metadata only:
 VMLens does not capture packet payloads, HTTP bodies, TLS plaintext, SSH
 content, database queries, files, command lines, or request/response bodies.
 
+## Traffic classification
+
+VMLens classifies a flow as internal only when the destination IP belongs to a
+registered VM in the VMLens inventory. This avoids counting an untracked private
+cloud VM as internal just because it uses a `10.x`, `172.16.x` or `192.168.x`
+address.
+
+Default scopes:
+
+- `internal_same_tenant`: source and destination are registered VMs in the same tenant;
+- `internal_cross_tenant`: source and destination are registered VMs in different tenants;
+- `external_private`: destination is a private IP but not a registered VM;
+- `external_public`: destination is a public IP;
+- `unknown_internal`: optional discovery mode for unregistered private IPs.
+
+To enable the older discovery behavior:
+
+```bash
+UNREGISTERED_INTERNAL_SCOPE=unknown_internal docker compose up -d --build
+```
+
 ## Current tested flow
 
 The latest tested end-to-end flow uses prebuilt release assets:

@@ -17,6 +17,7 @@ export function FilterBar({ filters, onChange, onRefresh }: Props) {
       <option value="">All scopes</option><option value="internal_same_tenant">Same tenant</option>
       <option value="internal_cross_tenant">Cross tenant</option><option value="unknown_internal">Unknown internal</option>
       <option value="external_public">External public</option>
+      <option value="external_private">External private</option>
     </select></label>
     <label>Protocol<select value={filters.protocol} onChange={(event) => update('protocol', event.target.value)}>
       <option value="">TCP + UDP</option><option value="tcp">TCP</option><option value="udp">UDP</option>
@@ -30,4 +31,3 @@ export function FilterBar({ filters, onChange, onRefresh }: Props) {
     <button type="button" onClick={onRefresh}>Refresh</button>
   </section>
 }
-

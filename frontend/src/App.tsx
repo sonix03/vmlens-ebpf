@@ -48,7 +48,7 @@ function applyLiveSummary(summary: Summary | undefined, flow: Flow, observedAt: 
       updated_at: observedAt,
     }
   }
-  if (flow.scope === 'external_public') {
+  if (flow.scope === 'external_public' || flow.scope === 'external_private') {
     return {
       ...summary,
       ...requestPatch,
@@ -69,6 +69,10 @@ function edgeWeight(bytes: number): number {
   return 1
 }
 
+function nodeSafe(value: string): string {
+  return value.replaceAll(':', '_').replaceAll('/', '_').replaceAll('%', '_')
+}
+
 function vmToGraphNode(vm: VM): GraphNode {
   return {
     id: vm.id,
@@ -81,6 +85,33 @@ function vmToGraphNode(vm: VM): GraphNode {
     traffic_in: 0,
     traffic_out: 0,
   }
+}
+
+function liveExternalTarget(flow: Flow): GraphNode | undefined {
+  if (flow.dst_vm_id) return undefined
+  if (flow.scope === 'external_public' || flow.scope === 'external_private') {
+    return {
+      id: `external-${nodeSafe(flow.dst_ip)}`,
+      type: 'external',
+      label: flow.dst_ip,
+      ip: flow.dst_ip,
+      status: 'external',
+      traffic_in: 0,
+      traffic_out: 0,
+    }
+  }
+  if (flow.scope === 'unknown_internal') {
+    return {
+      id: `unknown-internal-${nodeSafe(flow.dst_ip)}`,
+      type: 'unknown_internal',
+      label: flow.dst_ip,
+      ip: flow.dst_ip,
+      status: 'unknown',
+      traffic_in: 0,
+      traffic_out: 0,
+    }
+  }
+  return undefined
 }
 
 function mergeVMInventory(graph: GraphData, inventory: GraphNode[]): GraphData {
@@ -125,11 +156,19 @@ function mergeGraphData(current: GraphData, next: GraphData): GraphData {
 }
 
 function applyLiveFlow(graph: GraphData, flow: Flow, observedAt: string): GraphData {
-  if (!flow.src_vm_id || !flow.dst_vm_id || flow.src_vm_id === flow.dst_vm_id) return graph
-  const vmIDs = new Set(graph.nodes.filter((node) => node.type === 'vm').map((node) => node.id))
-  if (!vmIDs.has(flow.src_vm_id) || !vmIDs.has(flow.dst_vm_id)) return graph
+  if (!flow.src_vm_id) return graph
+  const sourceExists = graph.nodes.some((node) => node.id === flow.src_vm_id && node.type === 'vm')
+  if (!sourceExists) return graph
 
-  const id = `${flow.src_vm_id}->${flow.dst_vm_id}:${flow.dst_port}/${flow.protocol}`
+  const externalTarget = liveExternalTarget(flow)
+  const targetID = flow.dst_vm_id || externalTarget?.id
+  if (!targetID || targetID === flow.src_vm_id) return graph
+  if (flow.dst_vm_id && !graph.nodes.some((node) => node.id === flow.dst_vm_id)) return graph
+
+  const baseNodes = externalTarget && !graph.nodes.some((node) => node.id === externalTarget.id)
+    ? [...graph.nodes, externalTarget]
+    : graph.nodes
+  const id = `${flow.src_vm_id}->${targetID}:${flow.dst_port}/${flow.protocol}`
   const index = graph.edges.findIndex((edge) => edge.id === id)
   const previous = index >= 0 ? graph.edges[index] : undefined
   const bytesSent = (previous?.bytes_sent ?? 0) + flow.bytes_sent
@@ -137,7 +176,7 @@ function applyLiveFlow(graph: GraphData, flow: Flow, observedAt: string): GraphD
   const edge: GraphEdge = {
     id,
     source: flow.src_vm_id,
-    target: flow.dst_vm_id,
+    target: targetID,
     protocol: flow.protocol,
     dst_port: flow.dst_port,
     scope: flow.scope,
@@ -156,11 +195,11 @@ function applyLiveFlow(graph: GraphData, flow: Flow, observedAt: string): GraphD
   const edges = index >= 0
     ? graph.edges.map((item, edgeIndex) => edgeIndex === index ? edge : item)
     : [...graph.edges, edge]
-  const nodes = graph.nodes.map((node) => {
+  const nodes = baseNodes.map((node) => {
     if (node.id === flow.src_vm_id) {
       return { ...node, traffic_out: node.traffic_out + flow.bytes_sent, traffic_in: node.traffic_in + flow.bytes_received }
     }
-    if (node.id === flow.dst_vm_id) {
+    if (node.id === targetID) {
       return { ...node, traffic_in: node.traffic_in + flow.bytes_sent, traffic_out: node.traffic_out + flow.bytes_received }
     }
     return node
