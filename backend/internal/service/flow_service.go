@@ -58,13 +58,13 @@ func (s *FlowService) Ingest(ctx context.Context, event model.FlowEvent) (model.
 	}
 
 	switch scope {
-	case "unknown_internal":
+	case ScopeUnknownInternal:
 		_, err = tx.Exec(ctx, `
 			INSERT INTO unknown_internal_hosts (ip, first_seen, last_seen)
 			VALUES ($1::inet, $2, $3)
 			ON CONFLICT (ip) DO UPDATE SET last_seen = GREATEST(unknown_internal_hosts.last_seen, EXCLUDED.last_seen)`,
 			event.DstIP, event.FirstSeen, event.LastSeen)
-	case "external_public":
+	case ScopeExternalPublic, ScopeExternalPrivate:
 		_, err = tx.Exec(ctx, `
 			INSERT INTO external_hosts (ip, first_seen, last_seen)
 			VALUES ($1::inet, $2, $3)

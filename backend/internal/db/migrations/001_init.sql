@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS network_flows (
   dst_port INTEGER,
   protocol TEXT NOT NULL CHECK (protocol IN ('tcp', 'udp')),
   direction TEXT NOT NULL DEFAULT 'egress' CHECK (direction IN ('ingress', 'egress')),
-  scope TEXT NOT NULL CHECK (scope IN ('internal_same_tenant', 'internal_cross_tenant', 'unknown_internal', 'external_public', 'unknown')),
+  scope TEXT NOT NULL CHECK (scope IN ('internal_same_tenant', 'internal_cross_tenant', 'unknown_internal', 'external_public', 'external_private', 'unknown')),
   bytes_sent BIGINT NOT NULL DEFAULT 0 CHECK (bytes_sent >= 0),
   bytes_received BIGINT NOT NULL DEFAULT 0 CHECK (bytes_received >= 0),
   packets BIGINT NOT NULL DEFAULT 0 CHECK (packets >= 0),

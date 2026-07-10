@@ -167,7 +167,7 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 			sourceID = "unknown-source-" + nodeSafe(row.SrcIP)
 			if _, ok := nodes[sourceID]; !ok {
 				nodeType := "unknown"
-				if row.Scope == "unknown_internal" || strings.HasPrefix(row.Scope, "internal_") {
+				if row.Scope == ScopeUnknownInternal || strings.HasPrefix(row.Scope, "internal_") {
 					nodeType = "unknown_internal"
 				}
 				nodes[sourceID] = &model.GraphNode{ID: sourceID, Type: nodeType, Label: row.SrcIP, IP: row.SrcIP, Status: "unknown"}
@@ -186,10 +186,10 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 		} else {
 			nodeType, prefix := "unknown", "unknown-"
 			status := "unknown"
-			if row.Scope == "unknown_internal" {
+			if row.Scope == ScopeUnknownInternal {
 				nodeType, prefix = "unknown_internal", "unknown-internal-"
 			}
-			if row.Scope == "external_public" {
+			if row.Scope == ScopeExternalPublic || row.Scope == ScopeExternalPrivate {
 				nodeType, prefix, status = "external", "external-", "external"
 			}
 			targetID = prefix + nodeSafe(row.DstIP)
