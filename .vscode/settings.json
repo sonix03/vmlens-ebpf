@@ -1,0 +1,27 @@
+{
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/node_modules/**": true,
+    "**/dist/**": true,
+    "**/bin/**": true,
+    "**/data/**": true,
+    "**/*.tsbuildinfo": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/bin": true,
+    "**/data": true,
+    "**/*.tsbuildinfo": true
+  },
+  "files.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/bin": true,
+    "**/data": true,
+    "**/*.tsbuildinfo": true
+  },
+  "editor.largeFileOptimizations": true,
+  "editor.minimap.enabled": false
+}
