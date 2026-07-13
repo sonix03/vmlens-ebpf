@@ -14,10 +14,11 @@ AGENT_PUBLIC_IP="${AGENT_PUBLIC_IP:-}"
 AGENT_IGNORE_IPS="${AGENT_IGNORE_IPS:-}"
 AGENT_ENVIRONMENT="${AGENT_ENVIRONMENT:-external-vm}"
 FLOW_INTERVAL="${FLOW_INTERVAL:-1s}"
-CAPTURE_MODE="${CAPTURE_MODE:-auto}"
-CAPTURE_INTERFACE="${CAPTURE_INTERFACE:-}"
+CAPTURE_MODE="${CAPTURE_MODE:-tc}"
+CAPTURE_INTERFACE="${CAPTURE_INTERFACE:-ens3}"
 FLOW_ALLOW_CIDRS="${FLOW_ALLOW_CIDRS:-}"
 FLOW_DENY_CIDRS="${FLOW_DENY_CIDRS:-}"
+AUTO_DENY_TUNNEL_PEER="${AUTO_DENY_TUNNEL_PEER:-true}"
 
 # auto: use prebuilt files when URLs/paths are provided, otherwise build locally.
 # prebuilt: require prebuilt agent binary and, in real mode, prebuilt eBPF object.
@@ -41,6 +42,86 @@ mkdir -p "${GOMODCACHE}" "${GOCACHE}"
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 install -d -m0750 /etc/vmlens /usr/lib/vmlens
+
+append_csv_unique() {
+  local current="$1"
+  local value="$2"
+  local part
+  [[ -n "${value}" ]] || { printf '%s\n' "${current}"; return; }
+  IFS=',' read -r -a parts <<<"${current}"
+  for part in "${parts[@]}"; do
+    if [[ "${part}" == "${value}" ]]; then
+      printf '%s\n' "${current}"
+      return
+    fi
+  done
+  if [[ -z "${current}" ]]; then
+    printf '%s\n' "${value}"
+  else
+    printf '%s,%s\n' "${current}" "${value}"
+  fi
+}
+
+ip_to_cidr() {
+  local ip="$1"
+  if [[ "${ip}" == *:* ]]; then
+    printf '%s/128\n' "${ip}"
+  else
+    printf '%s/32\n' "${ip}"
+  fi
+}
+
+ssh_peer_ip() {
+  if [[ -n "${SSH_CLIENT:-}" ]]; then
+    awk '{print $1; exit}' <<<"${SSH_CLIENT}"
+    return
+  fi
+  if [[ -n "${SSH_CONNECTION:-}" ]]; then
+    awk '{print $1; exit}' <<<"${SSH_CONNECTION}"
+    return
+  fi
+  who -m 2>/dev/null | sed -n 's/.*(\([^)]*\)).*/\1/p' | awk '{print $1; exit}'
+}
+
+auto_filter_tunnel_peer() {
+  [[ "${AUTO_DENY_TUNNEL_PEER}" == "true" ]] || return 0
+  local peer_ip
+  peer_ip="$(ssh_peer_ip || true)"
+  [[ -n "${peer_ip}" ]] || return 0
+  case "${peer_ip}" in
+    127.*|::1) return 0 ;;
+  esac
+  AGENT_IGNORE_IPS="$(append_csv_unique "${AGENT_IGNORE_IPS}" "${peer_ip}")"
+  FLOW_DENY_CIDRS="$(append_csv_unique "${FLOW_DENY_CIDRS}" "$(ip_to_cidr "${peer_ip}")")"
+  echo "VMLens: auto-filtering SSH tunnel peer from captured flows: ${peer_ip}" >&2
+}
+
+default_route_interface() {
+  ip route show default 2>/dev/null | awk '{print $5; exit}'
+}
+
+resolve_capture_interface() {
+  case "${CAPTURE_MODE}" in
+    tc|auto) ;;
+    *) return 0 ;;
+  esac
+  if [[ -n "${CAPTURE_INTERFACE}" ]] && ip link show "${CAPTURE_INTERFACE}" >/dev/null 2>&1; then
+    return 0
+  fi
+  local fallback
+  fallback="$(default_route_interface || true)"
+  if [[ -n "${fallback}" ]]; then
+    if [[ -n "${CAPTURE_INTERFACE}" ]]; then
+      echo "VMLens: capture interface ${CAPTURE_INTERFACE} not found; using default-route interface ${fallback}" >&2
+    fi
+    CAPTURE_INTERFACE="${fallback}"
+    return 0
+  fi
+  if [[ "${CAPTURE_MODE}" == "tc" ]]; then
+    echo "CAPTURE_INTERFACE=${CAPTURE_INTERFACE} not found and no default-route interface was detected" >&2
+    exit 1
+  fi
+}
 
 download_file() {
   local url="$1"
@@ -114,6 +195,9 @@ has_agent_prebuilt() {
 has_bpf_prebuilt() {
   [[ -n "${BPF_OBJECT_URL}" || -n "${BPF_OBJECT_PATH}" ]]
 }
+
+auto_filter_tunnel_peer
+resolve_capture_interface
 
 case "${INSTALL_MODE}" in
   prebuilt)

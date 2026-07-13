@@ -90,3 +90,16 @@ CAPTURE_INTERFACE=ens3
 
 If `ens3` does not exist, the provided cloud-init scripts automatically fall
 back to the VM default-route interface.
+
+`BACKEND_URL=http://127.0.0.1:18080` is still correct. It points to the reverse
+SSH tunnel endpoint inside the VM. Traffic capture is controlled separately by
+`CAPTURE_MODE` and `CAPTURE_INTERFACE`.
+
+If cloud-init installs the agent before the SSH tunnel exists, it cannot
+auto-detect the local tunnel peer IP. To prevent tunnel traffic from appearing
+as `external_private`, set the local tunnel peer manually:
+
+```text
+AGENT_IGNORE_IPS=10.20.20.125
+FLOW_DENY_CIDRS=10.20.20.125/32
+```

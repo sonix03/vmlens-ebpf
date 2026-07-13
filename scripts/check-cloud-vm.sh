@@ -62,6 +62,8 @@ cd vmlens-ebpf
 
 BACKEND_URL=http://127.0.0.1:18080 \\
 AGENT_PUBLIC_IP=${vm_host} \\
+CAPTURE_MODE=tc \\
+CAPTURE_INTERFACE=ens3 \\
 bash scripts/vmlens-agent.sh start
 
 Then check locally:

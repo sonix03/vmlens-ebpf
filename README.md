@@ -198,6 +198,9 @@ http://127.0.0.1:18080
 That port exists inside the VM because the local machine created a reverse SSH
 tunnel.
 
+The tunnel is only for agent telemetry. VM network traffic is captured from the
+VM interface, normally `ens3`, through Traffic Control.
+
 ### 3. Install the VM agent from release
 
 Run on each cloud VM:
@@ -213,6 +216,8 @@ sudo env \
   BACKEND_URL=http://127.0.0.1:18080 \
   MOCK_MODE=false \
   FLOW_INTERVAL=1s \
+  CAPTURE_MODE=tc \
+  CAPTURE_INTERFACE=ens3 \
   AGENT_BINARY_URL=https://github.com/sonix03/vmlens-ebpf/releases/download/v2.7/vmlens-agent-linux-amd64 \
   BPF_OBJECT_URL=https://github.com/sonix03/vmlens-ebpf/releases/download/v2.7/flow_tracker-linux-amd64.bpf.o \
   bash /tmp/vmlens-install-agent.sh
@@ -231,8 +236,12 @@ Expected:
 ```text
 active
 registered agent=...
-eBPF collector loaded object=/usr/lib/vmlens/flow_tracker.bpf.o
+eBPF collector loaded object=/usr/lib/vmlens/flow_tracker.bpf.o mode=tc interface=ens3
 ```
+
+When the install command is run over SSH, the installer automatically adds the
+SSH tunnel peer IP to the deny filter so backend tunnel traffic is not counted
+as external VM traffic.
 
 ### 4. Verify local dashboard sees the VMs
 

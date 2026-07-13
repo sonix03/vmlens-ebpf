@@ -96,6 +96,19 @@ For OpenStack Ubuntu 24.04 VMs, `ens3` is usually the primary interface:
 CAPTURE_MODE=tc CAPTURE_INTERFACE=ens3
 ```
 
+The reverse SSH tunnel still uses `BACKEND_URL=http://127.0.0.1:18080`.
+That loopback address is only the telemetry path from the agent to the local
+backend. Captured application traffic comes from `CAPTURE_INTERFACE`.
+
+When `scripts/install-agent.sh` or `scripts/vmlens-agent.sh start` is run over
+SSH, the installer auto-detects the SSH client IP and appends it to
+`IGNORE_IPS` and `FLOW_DENY_CIDRS`. This prevents the backend tunnel itself
+from being counted as VM external traffic. Disable this only when debugging:
+
+```bash
+AUTO_DENY_TUNNEL_PEER=false
+```
+
 If DeepFlow or another eBPF tool owns incompatible TC hooks on the same
 interface, use:
 
