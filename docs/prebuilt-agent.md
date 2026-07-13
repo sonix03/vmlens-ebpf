@@ -50,6 +50,8 @@ sudo env \
   BACKEND_URL=http://127.0.0.1:18080 \
   MOCK_MODE=false \
   FLOW_INTERVAL=1s \
+  CAPTURE_MODE=tc \
+  CAPTURE_INTERFACE=ens3 \
   bash scripts/vmlens-agent.sh start
 ```
 
@@ -79,3 +81,24 @@ test -r /sys/kernel/btf/vmlinux
 ```
 
 Ubuntu 24.04 images usually have this.
+
+## Capture mode
+
+```text
+CAPTURE_MODE=auto    try Traffic Control first, then fallback to kprobe
+CAPTURE_MODE=tc      require TCX/Traffic Control on CAPTURE_INTERFACE
+CAPTURE_MODE=kprobe  use socket-level kprobes only
+```
+
+For OpenStack Ubuntu 24.04 VMs, `ens3` is usually the primary interface:
+
+```bash
+CAPTURE_MODE=tc CAPTURE_INTERFACE=ens3
+```
+
+If DeepFlow or another eBPF tool owns incompatible TC hooks on the same
+interface, use:
+
+```bash
+CAPTURE_MODE=kprobe
+```

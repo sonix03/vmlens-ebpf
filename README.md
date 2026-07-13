@@ -95,6 +95,11 @@ result: 20/20 HTTP 200, internal flows and request counters increased
 
 Full copy-paste E2E notes are in [SONI.txt](./SONI.txt).
 
+For external private service VMs across zones, use the dedicated flow in
+[docs/external-multizone-tracking.md](./docs/external-multizone-tracking.md).
+That setup captures tracked internal VMs through Traffic Control on `ens3` while
+keeping unregistered private service VMs counted as `external_private`.
+
 ## Architecture
 
 ```text
