@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,31 +30,70 @@ type rawFlowEvent struct {
 	Family      uint16
 	Protocol    uint8
 	Direction   uint8
-	Padding     [4]byte
+	Packets     uint32
+}
+
+type EBPFOptions struct {
+	ObjectPath       string
+	CaptureMode      string
+	CaptureInterface string
 }
 
 type EBPFCollector struct {
 	registration model.Registration
+	captureMode  string
+	ifaceName    string
 	collection   *cebpf.Collection
 	links        []link.Link
 	reader       *ringbuf.Reader
 	closeOnce    sync.Once
 }
 
-func NewEBPF(registration model.Registration, objectPath string) (*EBPFCollector, error) {
+func NewEBPF(registration model.Registration, options EBPFOptions) (*EBPFCollector, error) {
+	mode := strings.ToLower(strings.TrimSpace(options.CaptureMode))
+	if mode == "" {
+		mode = "auto"
+	}
+	if mode != "auto" && mode != "tc" && mode != "kprobe" {
+		return nil, fmt.Errorf("unsupported capture mode %q", options.CaptureMode)
+	}
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return nil, fmt.Errorf("remove memlock: %w", err)
 	}
-	spec, err := cebpf.LoadCollectionSpec(objectPath)
+	spec, err := cebpf.LoadCollectionSpec(options.ObjectPath)
 	if err != nil {
-		return nil, fmt.Errorf("read eBPF object %q: %w", objectPath, err)
+		return nil, fmt.Errorf("read eBPF object %q: %w", options.ObjectPath, err)
 	}
 	collection, err := cebpf.NewCollection(spec)
 	if err != nil {
 		return nil, fmt.Errorf("load eBPF object (root/CAP_BPF required): %w", err)
 	}
-	c := &EBPFCollector{registration: registration, collection: collection}
+	c := &EBPFCollector{
+		registration: registration,
+		captureMode:  mode,
+		ifaceName:    strings.TrimSpace(options.CaptureInterface),
+		collection:   collection,
+	}
 	fail := func(err error) (*EBPFCollector, error) { _ = c.Close(); return nil, err }
+
+	if mode == "tc" || mode == "auto" {
+		if err := c.attachTCX(); err == nil {
+			if eventsMap := collection.Maps["events"]; eventsMap != nil {
+				c.reader, err = ringbuf.NewReader(eventsMap)
+				if err != nil {
+					return fail(err)
+				}
+				return c, nil
+			}
+			return fail(fmt.Errorf("events ring buffer missing"))
+		} else if mode == "tc" {
+			return fail(err)
+		}
+	}
+
+	if mode == "tc" {
+		return fail(fmt.Errorf("tc capture requested but no TCX program was attached"))
+	}
 
 	attachments := []struct {
 		program  string
@@ -106,6 +146,47 @@ func NewEBPF(registration model.Registration, objectPath string) (*EBPFCollector
 	return c, nil
 }
 
+func (c *EBPFCollector) attachTCX() error {
+	ifaceName := c.ifaceName
+	if ifaceName == "" {
+		ifaceName = c.defaultInterfaceName()
+	}
+	if ifaceName == "" {
+		return fmt.Errorf("capture interface is empty")
+	}
+	iface, err := net.InterfaceByName(ifaceName)
+	if err != nil {
+		return fmt.Errorf("lookup capture interface %q: %w", ifaceName, err)
+	}
+	ingress := c.collection.Programs["tc_ingress"]
+	egress := c.collection.Programs["tc_egress"]
+	if ingress == nil || egress == nil {
+		return fmt.Errorf("tc_ingress/tc_egress programs missing")
+	}
+	ingressLink, err := link.AttachTCX(link.TCXOptions{
+		Interface: iface.Index,
+		Program:   ingress,
+		Attach:    cebpf.AttachTCXIngress,
+	})
+	if err != nil {
+		return fmt.Errorf("attach tc ingress on %s: %w", ifaceName, err)
+	}
+	egressLink, err := link.AttachTCX(link.TCXOptions{
+		Interface: iface.Index,
+		Program:   egress,
+		Attach:    cebpf.AttachTCXEgress,
+	})
+	if err != nil {
+		_ = ingressLink.Close()
+		return fmt.Errorf("attach tc egress on %s: %w", ifaceName, err)
+	}
+	c.links = append(c.links, ingressLink)
+	c.links = append(c.links, egressLink)
+	c.captureMode = "tc"
+	c.ifaceName = ifaceName
+	return nil
+}
+
 func (c *EBPFCollector) Run(ctx context.Context) (<-chan model.FlowEvent, <-chan error) {
 	events := make(chan model.FlowEvent, 1024)
 	errorsChannel := make(chan error, 8)
@@ -152,17 +233,28 @@ func (c *EBPFCollector) convert(raw rawFlowEvent) model.FlowEvent {
 		AgentID: c.registration.AgentID, SrcIP: sourceIP, DstIP: destinationIP,
 		SrcPort: int(raw.SrcPort), DstPort: int(raw.DstPort), Protocol: protocol,
 		Direction: direction, ConnectionCount: int64(raw.Connections), RequestCount: requestCount(protocol, direction, raw),
-		FirstSeen: now, LastSeen: now,
+		Packets: int64(raw.Packets), FirstSeen: now, LastSeen: now,
 	}
 	if direction == "ingress" {
 		event.BytesReceived = int64(raw.Bytes)
 	} else {
 		event.BytesSent = int64(raw.Bytes)
 	}
-	if len(c.registration.Interfaces) > 0 {
+	if c.ifaceName != "" {
+		event.Interface = c.ifaceName
+	} else if len(c.registration.Interfaces) > 0 {
 		event.Interface = c.registration.Interfaces[0].Name
 	}
 	return event
+}
+
+func (c *EBPFCollector) defaultInterfaceName() string {
+	for _, iface := range c.registration.Interfaces {
+		if iface.Name != "" {
+			return iface.Name
+		}
+	}
+	return ""
 }
 
 func requestCount(protocol, direction string, raw rawFlowEvent) int64 {

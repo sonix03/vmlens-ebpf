@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/signal"
@@ -38,6 +39,10 @@ func run() error {
 	defer stop()
 	client := sender.New(cfg.BackendURL, cfg.HTTPTimeout)
 	controlPlane := newEndpointFilter(cfg.BackendURL, cfg.IgnoreIPs)
+	flowFilter, err := newFlowFilter(cfg.AllowCIDRs, cfg.DenyCIDRs)
+	if err != nil {
+		return err
+	}
 
 	result, err := registerUntilReady(ctx, client, registration)
 	if err != nil {
@@ -50,11 +55,15 @@ func run() error {
 	if cfg.MockMode {
 		source = collector.NewMock(registration, cfg.FlowInterval)
 	} else {
-		source, err = collector.NewEBPF(registration, cfg.BPFObject)
+		source, err = collector.NewEBPF(registration, collector.EBPFOptions{
+			ObjectPath:       cfg.BPFObject,
+			CaptureMode:      cfg.CaptureMode,
+			CaptureInterface: cfg.CaptureInterface,
+		})
 		if err != nil {
 			return fmt.Errorf("start real eBPF collector: %w", err)
 		}
-		log.Printf("eBPF collector loaded object=%s", cfg.BPFObject)
+		log.Printf("eBPF collector loaded object=%s mode=%s interface=%s", cfg.BPFObject, cfg.CaptureMode, cfg.CaptureInterface)
 	}
 	defer source.Close()
 	events, collectorErrors := source.Run(ctx)
@@ -76,6 +85,9 @@ func run() error {
 			// request creates socket activity; forwarding that activity again would
 			// create a self-amplifying control-plane feedback loop.
 			if ignoreFlow(controlPlane, event.DstIP) {
+				continue
+			}
+			if !flowFilter.allows(event) {
 				continue
 			}
 			pendingFlows.Add(event)
@@ -183,6 +195,11 @@ func runFlowSender(ctx context.Context, client *sender.Sender, batches <-chan []
 
 type endpointFilter struct{ addresses map[string]struct{} }
 
+type flowFilter struct {
+	allow []netip.Prefix
+	deny  []netip.Prefix
+}
+
 func newEndpointFilter(rawURL string, ignoredIPs []string) endpointFilter {
 	filter := endpointFilter{addresses: map[string]struct{}{}}
 	for _, raw := range ignoredIPs {
@@ -222,6 +239,68 @@ func ignoreFlow(controlPlane endpointFilter, destination string) bool {
 		return true
 	}
 	return controlPlane.matches(destination)
+}
+
+func newFlowFilter(rawAllow, rawDeny []string) (flowFilter, error) {
+	parse := func(values []string, label string) ([]netip.Prefix, error) {
+		prefixes := make([]netip.Prefix, 0, len(values))
+		for _, value := range values {
+			prefix, err := netip.ParsePrefix(value)
+			if err != nil {
+				addr, addrErr := netip.ParseAddr(value)
+				if addrErr != nil {
+					return nil, fmt.Errorf("parse %s %q: %w", label, value, err)
+				}
+				prefix = netip.PrefixFrom(addr, addr.BitLen())
+			}
+			prefixes = append(prefixes, prefix.Masked())
+		}
+		return prefixes, nil
+	}
+	allow, err := parse(rawAllow, "FLOW_ALLOW_CIDRS")
+	if err != nil {
+		return flowFilter{}, err
+	}
+	deny, err := parse(rawDeny, "FLOW_DENY_CIDRS")
+	if err != nil {
+		return flowFilter{}, err
+	}
+	return flowFilter{allow: allow, deny: deny}, nil
+}
+
+func (f flowFilter) allows(event model.FlowEvent) bool {
+	src, srcOK := parseAddr(event.SrcIP)
+	dst, dstOK := parseAddr(event.DstIP)
+	if !srcOK && !dstOK {
+		return false
+	}
+	if f.matches(f.deny, src, srcOK) || f.matches(f.deny, dst, dstOK) {
+		return false
+	}
+	if len(f.allow) == 0 {
+		return true
+	}
+	return f.matches(f.allow, src, srcOK) || f.matches(f.allow, dst, dstOK)
+}
+
+func (f flowFilter) matches(prefixes []netip.Prefix, addr netip.Addr, ok bool) bool {
+	if !ok {
+		return false
+	}
+	for _, prefix := range prefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseAddr(value string) (netip.Addr, bool) {
+	addr, err := netip.ParseAddr(value)
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	return addr, true
 }
 
 func registerUntilReady(ctx context.Context, client *sender.Sender, registration model.Registration) (model.RegistrationResult, error) {

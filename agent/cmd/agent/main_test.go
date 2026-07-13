@@ -19,6 +19,25 @@ func TestEndpointFilterIncludesConfiguredTunnelPeer(t *testing.T) {
 	}
 }
 
+func TestFlowFilterAllowAndDenyCIDRs(t *testing.T) {
+	filter, err := newFlowFilter([]string{"10.20.20.0/24", "203.0.113.10"}, []string{"10.20.20.125/32"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filter.allows(model.FlowEvent{SrcIP: "10.20.20.130", DstIP: "198.51.100.20"}) {
+		t.Fatal("source in allow CIDR should pass")
+	}
+	if !filter.allows(model.FlowEvent{SrcIP: "10.30.30.10", DstIP: "203.0.113.10"}) {
+		t.Fatal("single IP allow CIDR should pass")
+	}
+	if filter.allows(model.FlowEvent{SrcIP: "10.20.20.130", DstIP: "10.20.20.125"}) {
+		t.Fatal("deny CIDR should override allow CIDR")
+	}
+	if filter.allows(model.FlowEvent{SrcIP: "10.30.30.10", DstIP: "198.51.100.20"}) {
+		t.Fatal("flow outside allow CIDRs should be dropped")
+	}
+}
+
 func TestFlowAccumulatorPreservesByteTotals(t *testing.T) {
 	accumulator := newFlowAccumulator()
 	first := time.Date(2026, 7, 6, 10, 0, 0, 0, time.UTC)

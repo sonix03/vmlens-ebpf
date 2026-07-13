@@ -15,6 +15,8 @@ type Config struct {
 	FlowInterval      time.Duration
 	HTTPTimeout       time.Duration
 	BPFObject         string
+	CaptureMode       string
+	CaptureInterface  string
 	AgentID           string
 	Hostname          string
 	MachineID         string
@@ -23,6 +25,8 @@ type Config struct {
 	PublicIP          string
 	MACAddresses      []string
 	IgnoreIPs         []string
+	AllowCIDRs        []string
+	DenyCIDRs         []string
 	Environment       string
 	AgentVersion      string
 }
@@ -47,11 +51,16 @@ func Load() (Config, error) {
 	return Config{
 		BackendURL: env("BACKEND_URL", "http://localhost:8080"), MockMode: mockMode,
 		HeartbeatInterval: heartbeat, FlowInterval: flowInterval, HTTPTimeout: httpTimeout,
-		BPFObject: env("BPF_OBJECT", "./ebpf/flow_tracker.bpf.o"), AgentID: os.Getenv("AGENT_ID"),
-		Hostname: os.Getenv("AGENT_HOSTNAME"), MachineID: os.Getenv("MACHINE_ID"),
+		BPFObject:        env("BPF_OBJECT", "./ebpf/flow_tracker.bpf.o"),
+		CaptureMode:      env("CAPTURE_MODE", "auto"),
+		CaptureInterface: strings.TrimSpace(os.Getenv("CAPTURE_INTERFACE")),
+		AgentID:          os.Getenv("AGENT_ID"),
+		Hostname:         os.Getenv("AGENT_HOSTNAME"), MachineID: os.Getenv("MACHINE_ID"),
 		TenantID: os.Getenv("TENANT_ID"), PrivateIPs: csv(os.Getenv("AGENT_PRIVATE_IPS")),
 		PublicIP: os.Getenv("AGENT_PUBLIC_IP"), MACAddresses: csv(os.Getenv("AGENT_MAC_ADDRESSES")),
 		IgnoreIPs:   csv(os.Getenv("IGNORE_IPS")),
+		AllowCIDRs:  csv(os.Getenv("FLOW_ALLOW_CIDRS")),
+		DenyCIDRs:   csv(os.Getenv("FLOW_DENY_CIDRS")),
 		Environment: env("AGENT_ENVIRONMENT", "local"), AgentVersion: env("AGENT_VERSION", "0.1.0"),
 	}, nil
 }
