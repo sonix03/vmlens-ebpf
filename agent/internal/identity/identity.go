@@ -12,10 +12,10 @@ import (
 	"strings"
 
 	"github.com/vmlens/vmlens/agent/internal/config"
-	"github.com/vmlens/vmlens/agent/internal/model"
+	"github.com/vmlens/vmlens/agent/internal/telemetry"
 )
 
-func Collect(cfg config.Config) (model.Registration, error) {
+func Collect(cfg config.Config) (telemetry.Registration, error) {
 	hostname := strings.TrimSpace(cfg.Hostname)
 	if hostname == "" {
 		hostname, _ = os.Hostname()
@@ -27,9 +27,9 @@ func Collect(cfg config.Config) (model.Registration, error) {
 	interfaces, privateIPs, macs := networkIdentity()
 	if len(cfg.PrivateIPs) > 0 {
 		privateIPs = cfg.PrivateIPs
-		interfaces = make([]model.Interface, 0, len(privateIPs))
+		interfaces = make([]telemetry.Interface, 0, len(privateIPs))
 		for index, ip := range privateIPs {
-			iface := model.Interface{Name: fmt.Sprintf("mock%d", index), IPAddress: ip}
+			iface := telemetry.Interface{Name: fmt.Sprintf("mock%d", index), IPAddress: ip}
 			if index < len(cfg.MACAddresses) {
 				iface.MACAddress = cfg.MACAddresses[index]
 			}
@@ -49,7 +49,7 @@ func Collect(cfg config.Config) (model.Registration, error) {
 		value := cfg.PublicIP
 		publicIP = &value
 	}
-	return model.Registration{
+	return telemetry.Registration{
 		AgentID: agentID, Hostname: hostname, MachineID: machineID, TenantID: cfg.TenantID,
 		PrivateIPs: privateIPs, PublicIP: publicIP, MACAddresses: macs, Interfaces: interfaces,
 		OS: operatingSystem(), Kernel: readTrimmed("/proc/sys/kernel/osrelease"),
@@ -57,10 +57,10 @@ func Collect(cfg config.Config) (model.Registration, error) {
 	}, nil
 }
 
-func networkIdentity() ([]model.Interface, []string, []string) {
+func networkIdentity() ([]telemetry.Interface, []string, []string) {
 	list, _ := net.Interfaces()
 	defaultInterfaces := defaultRouteInterfaces()
-	interfaces := []model.Interface{}
+	interfaces := []telemetry.Interface{}
 	privateIPs := []string{}
 	macs := []string{}
 	for _, iface := range list {
@@ -82,7 +82,7 @@ func networkIdentity() ([]model.Interface, []string, []string) {
 		}
 		addresses, _ := iface.Addrs()
 		if len(addresses) == 0 {
-			interfaces = append(interfaces, model.Interface{Name: iface.Name, MACAddress: mac})
+			interfaces = append(interfaces, telemetry.Interface{Name: iface.Name, MACAddress: mac})
 		}
 		for _, address := range addresses {
 			ip, _, err := net.ParseCIDR(address.String())
@@ -93,7 +93,7 @@ func networkIdentity() ([]model.Interface, []string, []string) {
 			if ip.To4() != nil {
 				privateIPs = append(privateIPs, value)
 			}
-			interfaces = append(interfaces, model.Interface{Name: iface.Name, IPAddress: value, MACAddress: mac})
+			interfaces = append(interfaces, telemetry.Interface{Name: iface.Name, IPAddress: value, MACAddress: mac})
 		}
 	}
 	return interfaces, unique(privateIPs), unique(macs)

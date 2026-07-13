@@ -39,7 +39,7 @@ mkdir -p "${out_dir}"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "${tmp_dir}"' EXIT
 
-fallback_vmlinux="${repo_dir}/agent/ebpf/vmlinux_fallback.h"
+fallback_vmlinux="${repo_dir}/agent/ebpf/include/vmlinux_fallback.h"
 if [[ -n "${VMLINUX_HEADER:-}" ]]; then
   [[ -r "${VMLINUX_HEADER}" ]] || { echo "VMLINUX_HEADER is not readable: ${VMLINUX_HEADER}" >&2; exit 1; }
   cp "${VMLINUX_HEADER}" "${tmp_dir}/vmlinux.h"
@@ -71,7 +71,7 @@ for arch in ${target_arches}; do
   echo "building flow_tracker eBPF object for ${arch}"
   "${clang_bin}" -O2 -g -target bpf -D"__TARGET_ARCH_${bpf_arch}" \
     -I "${tmp_dir}" \
-    -c "${repo_dir}/agent/ebpf/flow_tracker.bpf.c" \
+    -c "${repo_dir}/agent/ebpf/programs/flow_tracker.bpf.c" \
     -o "${out_dir}/flow_tracker-linux-${arch}.bpf.o"
 done
 

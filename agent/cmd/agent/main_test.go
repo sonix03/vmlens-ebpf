@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vmlens/vmlens/agent/internal/model"
+	"github.com/vmlens/vmlens/agent/internal/telemetry"
 )
 
 func TestEndpointFilterIncludesConfiguredTunnelPeer(t *testing.T) {
@@ -24,16 +24,16 @@ func TestFlowFilterAllowAndDenyCIDRs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !filter.allows(model.FlowEvent{SrcIP: "10.20.20.130", DstIP: "198.51.100.20"}) {
+	if !filter.allows(telemetry.FlowEvent{SrcIP: "10.20.20.130", DstIP: "198.51.100.20"}) {
 		t.Fatal("source in allow CIDR should pass")
 	}
-	if !filter.allows(model.FlowEvent{SrcIP: "10.30.30.10", DstIP: "203.0.113.10"}) {
+	if !filter.allows(telemetry.FlowEvent{SrcIP: "10.30.30.10", DstIP: "203.0.113.10"}) {
 		t.Fatal("single IP allow CIDR should pass")
 	}
-	if filter.allows(model.FlowEvent{SrcIP: "10.20.20.130", DstIP: "10.20.20.125"}) {
+	if filter.allows(telemetry.FlowEvent{SrcIP: "10.20.20.130", DstIP: "10.20.20.125"}) {
 		t.Fatal("deny CIDR should override allow CIDR")
 	}
-	if filter.allows(model.FlowEvent{SrcIP: "10.30.30.10", DstIP: "198.51.100.20"}) {
+	if filter.allows(telemetry.FlowEvent{SrcIP: "10.30.30.10", DstIP: "198.51.100.20"}) {
 		t.Fatal("flow outside allow CIDRs should be dropped")
 	}
 }
@@ -43,12 +43,12 @@ func TestFlowAccumulatorPreservesByteTotals(t *testing.T) {
 	first := time.Date(2026, 7, 6, 10, 0, 0, 0, time.UTC)
 	last := first.Add(time.Second)
 
-	accumulator.Add(model.FlowEvent{
+	accumulator.Add(telemetry.FlowEvent{
 		AgentID: "agent-a", SrcIP: "10.20.20.130", DstIP: "140.82.121.4",
 		SrcPort: 45000, DstPort: 443, Protocol: "tcp", Direction: "ingress",
 		BytesReceived: 8 * 1024 * 1024, ConnectionCount: 2, RequestCount: 2, FirstSeen: first, LastSeen: first,
 	})
-	accumulator.Add(model.FlowEvent{
+	accumulator.Add(telemetry.FlowEvent{
 		AgentID: "agent-a", SrcIP: "10.20.20.130", DstIP: "140.82.121.4",
 		SrcPort: 45000, DstPort: 443, Protocol: "tcp", Direction: "ingress",
 		BytesReceived: 17 * 1024 * 1024, ConnectionCount: 3, RequestCount: 3, FirstSeen: last, LastSeen: last,
@@ -74,7 +74,7 @@ func TestFlowAccumulatorPreservesByteTotals(t *testing.T) {
 
 func TestFlowAccumulatorKeepsDirectionsSeparate(t *testing.T) {
 	accumulator := newFlowAccumulator()
-	base := model.FlowEvent{
+	base := telemetry.FlowEvent{
 		AgentID: "agent-a", SrcIP: "10.20.20.130", DstIP: "140.82.121.4",
 		DstPort: 443, Protocol: "tcp",
 	}

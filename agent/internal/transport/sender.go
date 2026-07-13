@@ -1,4 +1,4 @@
-package sender
+package transport
 
 import (
 	"bytes"
@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vmlens/vmlens/agent/internal/model"
+	"github.com/vmlens/vmlens/agent/internal/telemetry"
 )
 
 type Sender struct {
@@ -22,17 +22,17 @@ func New(baseURL string, timeout time.Duration) *Sender {
 	return &Sender{baseURL: strings.TrimRight(baseURL, "/"), client: &http.Client{Timeout: timeout}}
 }
 
-func (s *Sender) Register(ctx context.Context, registration model.Registration) (model.RegistrationResult, error) {
-	var result model.RegistrationResult
+func (s *Sender) Register(ctx context.Context, registration telemetry.Registration) (telemetry.RegistrationResult, error) {
+	var result telemetry.RegistrationResult
 	err := s.post(ctx, "/api/agents/register", registration, &result)
 	return result, err
 }
 
-func (s *Sender) Heartbeat(ctx context.Context, heartbeat model.Heartbeat) error {
+func (s *Sender) Heartbeat(ctx context.Context, heartbeat telemetry.Heartbeat) error {
 	return s.post(ctx, "/api/agents/heartbeat", heartbeat, nil)
 }
 
-func (s *Sender) Flow(ctx context.Context, flow model.FlowEvent) error {
+func (s *Sender) Flow(ctx context.Context, flow telemetry.FlowEvent) error {
 	return s.post(ctx, "/api/flows/ingest", flow, nil)
 }
 

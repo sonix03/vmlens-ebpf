@@ -48,7 +48,7 @@ jobs:
           clang-18 -print-targets | grep -E '^[[:space:]]*bpf[[:space:]]' || true
           command -v bpftool || true
           bpftool version || true
-          ls -l /usr/include/bpf/bpf_helpers.h agent/ebpf/vmlinux_fallback.h
+          ls -l /usr/include/bpf/bpf_helpers.h agent/ebpf/include/vmlinux_fallback.h
           ls -l /sys/kernel/btf/vmlinux || true
           VERSION="${GITHUB_REF_NAME:-dev}" TARGET_ARCHES="amd64" CLANG_BIN=clang-18 bash -x scripts/build-agent-release.sh
 

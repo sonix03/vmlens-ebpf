@@ -1,10 +1,10 @@
-package collector
+package capture
 
 import (
 	"net"
 	"testing"
 
-	"github.com/vmlens/vmlens/agent/internal/model"
+	"github.com/vmlens/vmlens/agent/internal/telemetry"
 )
 
 func TestSocketIPSupportsIPv4AndIPv6(t *testing.T) {
@@ -22,7 +22,7 @@ func TestSocketIPSupportsIPv4AndIPv6(t *testing.T) {
 }
 
 func TestIPv6FallbackUsesRegisteredInterface(t *testing.T) {
-	collector := EBPFCollector{registration: model.Registration{Interfaces: []model.Interface{
+	collector := EBPFCollector{registration: telemetry.Registration{Interfaces: []telemetry.Interface{
 		{Name: "ens3", IPAddress: "10.20.20.130"},
 		{Name: "ens3", IPAddress: "fd00::130"},
 	}}}

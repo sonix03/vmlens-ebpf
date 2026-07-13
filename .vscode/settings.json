@@ -6,6 +6,7 @@
     "**/dist/**": true,
     "**/bin/**": true,
     "**/data/**": true,
+    "**/legacy/v1-stack/**": true,
     "**/*.tsbuildinfo": true
   },
   "search.exclude": {
@@ -13,6 +14,7 @@
     "**/dist": true,
     "**/bin": true,
     "**/data": true,
+    "**/legacy/v1-stack": true,
     "**/*.tsbuildinfo": true
   },
   "files.exclude": {

@@ -12,12 +12,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vmlens/vmlens/agent/internal/collector"
+	"github.com/vmlens/vmlens/agent/internal/capture"
 	"github.com/vmlens/vmlens/agent/internal/config"
-	"github.com/vmlens/vmlens/agent/internal/heartbeat"
 	"github.com/vmlens/vmlens/agent/internal/identity"
-	"github.com/vmlens/vmlens/agent/internal/model"
-	"github.com/vmlens/vmlens/agent/internal/sender"
+	"github.com/vmlens/vmlens/agent/internal/lifecycle"
+	"github.com/vmlens/vmlens/agent/internal/telemetry"
+	"github.com/vmlens/vmlens/agent/internal/transport"
 )
 
 func main() {
@@ -37,7 +37,7 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	client := sender.New(cfg.BackendURL, cfg.HTTPTimeout)
+	client := transport.New(cfg.BackendURL, cfg.HTTPTimeout)
 	controlPlane := newEndpointFilter(cfg.BackendURL, cfg.IgnoreIPs)
 	flowFilter, err := newFlowFilter(cfg.AllowCIDRs, cfg.DenyCIDRs)
 	if err != nil {
@@ -49,13 +49,13 @@ func run() error {
 		return err
 	}
 	log.Printf("registered agent=%s vm=%s hostname=%s mock=%t", result.AgentID, result.VMID, registration.Hostname, cfg.MockMode)
-	go heartbeat.Run(ctx, registration, cfg.HeartbeatInterval, client)
+	go lifecycle.Run(ctx, registration, cfg.HeartbeatInterval, client)
 
-	var source collector.Collector
+	var source capture.Collector
 	if cfg.MockMode {
-		source = collector.NewMock(registration, cfg.FlowInterval)
+		source = capture.NewMock(registration, cfg.FlowInterval)
 	} else {
-		source, err = collector.NewEBPF(registration, collector.EBPFOptions{
+		source, err = capture.NewEBPF(registration, capture.EBPFOptions{
 			ObjectPath:       cfg.BPFObject,
 			CaptureMode:      cfg.CaptureMode,
 			CaptureInterface: cfg.CaptureInterface,
@@ -70,7 +70,7 @@ func run() error {
 	flowTicker := time.NewTicker(cfg.FlowInterval)
 	defer flowTicker.Stop()
 	pendingFlows := newFlowAccumulator()
-	flowBatches := make(chan []model.FlowEvent, 32)
+	flowBatches := make(chan []telemetry.FlowEvent, 32)
 	go runFlowSender(ctx, client, flowBatches)
 	for events != nil || collectorErrors != nil {
 		select {
@@ -128,14 +128,14 @@ type flowKey struct {
 }
 
 type flowAccumulator struct {
-	flows map[flowKey]model.FlowEvent
+	flows map[flowKey]telemetry.FlowEvent
 }
 
 func newFlowAccumulator() *flowAccumulator {
-	return &flowAccumulator{flows: make(map[flowKey]model.FlowEvent)}
+	return &flowAccumulator{flows: make(map[flowKey]telemetry.FlowEvent)}
 }
 
-func (a *flowAccumulator) Add(event model.FlowEvent) {
+func (a *flowAccumulator) Add(event telemetry.FlowEvent) {
 	key := flowKey{
 		agentID: event.AgentID, srcIP: event.SrcIP, dstIP: event.DstIP,
 		dstPort: event.DstPort, protocol: event.Protocol, direction: event.Direction,
@@ -160,25 +160,25 @@ func (a *flowAccumulator) Add(event model.FlowEvent) {
 	a.flows[key] = current
 }
 
-func (a *flowAccumulator) AddAll(events []model.FlowEvent) {
+func (a *flowAccumulator) AddAll(events []telemetry.FlowEvent) {
 	for _, event := range events {
 		a.Add(event)
 	}
 }
 
-func (a *flowAccumulator) Drain() []model.FlowEvent {
+func (a *flowAccumulator) Drain() []telemetry.FlowEvent {
 	if len(a.flows) == 0 {
 		return nil
 	}
-	events := make([]model.FlowEvent, 0, len(a.flows))
+	events := make([]telemetry.FlowEvent, 0, len(a.flows))
 	for _, event := range a.flows {
 		events = append(events, event)
 	}
-	a.flows = make(map[flowKey]model.FlowEvent)
+	a.flows = make(map[flowKey]telemetry.FlowEvent)
 	return events
 }
 
-func runFlowSender(ctx context.Context, client *sender.Sender, batches <-chan []model.FlowEvent) {
+func runFlowSender(ctx context.Context, client *transport.Sender, batches <-chan []telemetry.FlowEvent) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -268,7 +268,7 @@ func newFlowFilter(rawAllow, rawDeny []string) (flowFilter, error) {
 	return flowFilter{allow: allow, deny: deny}, nil
 }
 
-func (f flowFilter) allows(event model.FlowEvent) bool {
+func (f flowFilter) allows(event telemetry.FlowEvent) bool {
 	src, srcOK := parseAddr(event.SrcIP)
 	dst, dstOK := parseAddr(event.DstIP)
 	if !srcOK && !dstOK {
@@ -303,7 +303,7 @@ func parseAddr(value string) (netip.Addr, bool) {
 	return addr, true
 }
 
-func registerUntilReady(ctx context.Context, client *sender.Sender, registration model.Registration) (model.RegistrationResult, error) {
+func registerUntilReady(ctx context.Context, client *transport.Sender, registration telemetry.Registration) (telemetry.RegistrationResult, error) {
 	delay := time.Second
 	for {
 		result, err := client.Register(ctx, registration)
@@ -313,7 +313,7 @@ func registerUntilReady(ctx context.Context, client *sender.Sender, registration
 		log.Printf("register: %v; retrying in %s", err, delay)
 		select {
 		case <-ctx.Done():
-			return model.RegistrationResult{}, ctx.Err()
+			return telemetry.RegistrationResult{}, ctx.Err()
 		case <-time.After(delay):
 		}
 		if delay < 30*time.Second {
@@ -325,7 +325,7 @@ func registerUntilReady(ctx context.Context, client *sender.Sender, registration
 	}
 }
 
-func sendFlow(ctx context.Context, client *sender.Sender, event model.FlowEvent) error {
+func sendFlow(ctx context.Context, client *transport.Sender, event telemetry.FlowEvent) error {
 	var last error
 	for attempt := 0; attempt < 3; attempt++ {
 		if err := client.Flow(ctx, event); err == nil {

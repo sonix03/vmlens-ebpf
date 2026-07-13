@@ -1,15 +1,15 @@
-package heartbeat
+package lifecycle
 
 import (
 	"context"
 	"log"
 	"time"
 
-	"github.com/vmlens/vmlens/agent/internal/model"
-	"github.com/vmlens/vmlens/agent/internal/sender"
+	"github.com/vmlens/vmlens/agent/internal/telemetry"
+	"github.com/vmlens/vmlens/agent/internal/transport"
 )
 
-func Run(ctx context.Context, registration model.Registration, interval time.Duration, client *sender.Sender) {
+func Run(ctx context.Context, registration telemetry.Registration, interval time.Duration, client *transport.Sender) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -17,7 +17,7 @@ func Run(ctx context.Context, registration model.Registration, interval time.Dur
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
-			heartbeat := model.Heartbeat{AgentID: registration.AgentID, Status: "online", Timestamp: now.UTC().Format(time.RFC3339Nano)}
+			heartbeat := telemetry.Heartbeat{AgentID: registration.AgentID, Status: "online", Timestamp: now.UTC().Format(time.RFC3339Nano)}
 			if err := client.Heartbeat(ctx, heartbeat); err != nil {
 				log.Printf("heartbeat: %v", err)
 				// Registration is idempotent. Retrying it here lets a live VM recover

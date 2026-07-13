@@ -1,4 +1,4 @@
-package heartbeat
+package lifecycle
 
 import (
 	"context"
@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vmlens/vmlens/agent/internal/model"
-	"github.com/vmlens/vmlens/agent/internal/sender"
+	"github.com/vmlens/vmlens/agent/internal/telemetry"
+	"github.com/vmlens/vmlens/agent/internal/transport"
 )
 
 func TestRunRegistersAgainAfterHeartbeatFailure(t *testing.T) {
@@ -32,8 +32,8 @@ func TestRunRegistersAgainAfterHeartbeatFailure(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registration := model.Registration{AgentID: "agent-test", Hostname: "vm-test", AgentVersion: "test"}
-	go Run(ctx, registration, time.Millisecond, sender.New(server.URL, time.Second))
+	registration := telemetry.Registration{AgentID: "agent-test", Hostname: "vm-test", AgentVersion: "test"}
+	go Run(ctx, registration, time.Millisecond, transport.New(server.URL, time.Second))
 
 	select {
 	case <-recovered:

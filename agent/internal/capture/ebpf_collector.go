@@ -1,4 +1,4 @@
-package collector
+package capture
 
 import (
 	"bytes"
@@ -16,7 +16,7 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 
-	"github.com/vmlens/vmlens/agent/internal/model"
+	"github.com/vmlens/vmlens/agent/internal/telemetry"
 )
 
 type rawFlowEvent struct {
@@ -40,7 +40,7 @@ type EBPFOptions struct {
 }
 
 type EBPFCollector struct {
-	registration model.Registration
+	registration telemetry.Registration
 	captureMode  string
 	ifaceName    string
 	collection   *cebpf.Collection
@@ -49,7 +49,7 @@ type EBPFCollector struct {
 	closeOnce    sync.Once
 }
 
-func NewEBPF(registration model.Registration, options EBPFOptions) (*EBPFCollector, error) {
+func NewEBPF(registration telemetry.Registration, options EBPFOptions) (*EBPFCollector, error) {
 	mode := strings.ToLower(strings.TrimSpace(options.CaptureMode))
 	if mode == "" {
 		mode = "auto"
@@ -187,8 +187,8 @@ func (c *EBPFCollector) attachTCX() error {
 	return nil
 }
 
-func (c *EBPFCollector) Run(ctx context.Context) (<-chan model.FlowEvent, <-chan error) {
-	events := make(chan model.FlowEvent, 1024)
+func (c *EBPFCollector) Run(ctx context.Context) (<-chan telemetry.FlowEvent, <-chan error) {
+	events := make(chan telemetry.FlowEvent, 1024)
 	errorsChannel := make(chan error, 8)
 	go func() {
 		defer close(events)
@@ -213,7 +213,7 @@ func (c *EBPFCollector) Run(ctx context.Context) (<-chan model.FlowEvent, <-chan
 	return events, errorsChannel
 }
 
-func (c *EBPFCollector) convert(raw rawFlowEvent) model.FlowEvent {
+func (c *EBPFCollector) convert(raw rawFlowEvent) telemetry.FlowEvent {
 	sourceIP, destinationIP := socketIP(raw.SrcAddr, raw.Family), socketIP(raw.DstAddr, raw.Family)
 	if parsed := net.ParseIP(sourceIP); parsed == nil || parsed.IsUnspecified() {
 		if fallback := c.fallbackSource(raw.Family); fallback != "" {
@@ -229,7 +229,7 @@ func (c *EBPFCollector) convert(raw rawFlowEvent) model.FlowEvent {
 		direction = "ingress"
 	}
 	now := time.Now().UTC()
-	event := model.FlowEvent{
+	event := telemetry.FlowEvent{
 		AgentID: c.registration.AgentID, SrcIP: sourceIP, DstIP: destinationIP,
 		SrcPort: int(raw.SrcPort), DstPort: int(raw.DstPort), Protocol: protocol,
 		Direction: direction, ConnectionCount: int64(raw.Connections), RequestCount: requestCount(protocol, direction, raw),

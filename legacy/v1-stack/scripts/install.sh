@@ -2,7 +2,7 @@
 set -euo pipefail
 
 [[ "$(uname -s)" == Linux ]] || { echo "VMLens supports Linux only" >&2; exit 1; }
-[[ "${EUID}" -eq 0 ]] || { echo "Run with sudo: sudo ./scripts/install.sh" >&2; exit 1; }
+[[ "${EUID}" -eq 0 ]] || { echo "Run with sudo: sudo ./legacy/v1-stack/scripts/install.sh" >&2; exit 1; }
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 make -C "$repo_dir" build

@@ -103,7 +103,7 @@ build_bpf_from_source() {
   esac
   cd "${repo_dir}/agent"
   clang -O2 -g -target bpf -D"__TARGET_ARCH_${bpf_arch}" \
-    -I "${build_dir}" -c ebpf/flow_tracker.bpf.c -o "${build_dir}/flow_tracker.bpf.o"
+    -I "${build_dir}" -c ebpf/programs/flow_tracker.bpf.c -o "${build_dir}/flow_tracker.bpf.o"
   install -m0644 "${build_dir}/flow_tracker.bpf.o" /usr/lib/vmlens/flow_tracker.bpf.o
 }
 

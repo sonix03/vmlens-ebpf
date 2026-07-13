@@ -1,11 +1,15 @@
-.PHONY: build test frontend-build up down logs clean
+.PHONY: build test agent-test backend-test frontend-build up down logs clean
 
 build:
 	cd backend && go build ./cmd/api
 	cd agent && go build ./cmd/agent
 
-test:
+test: backend-test agent-test
+
+backend-test:
 	cd backend && go test ./...
+
+agent-test:
 	cd agent && go test ./...
 
 frontend-build:

@@ -13,7 +13,9 @@ socket metadata ──────> network collector ─────┤
                                                └─> Prometheus exporter ─> Grafana
 ```
 
-The C programs under `bpf/` define exec/exit, TCP connect, and scheduler probes. `make bpf` generates `vmlinux.h` from kernel BTF and compiles CO-RE objects. The v0.1 userspace data path uses a `/proc` lifecycle fallback, so `make build` does not require a particular kernel or clang installation. This trades sub-sample process visibility for portability: a process that starts and exits between samples can be missed.
+The active VM-side eBPF program lives under `agent/ebpf/programs/`, with
+fallback headers under `agent/ebpf/include/`. Older prototype CO-RE programs
+were moved to `legacy/v1-stack/bpf/` for reference.
 
 CPU is computed from deltas in process scheduler ticks. RSS comes from `/proc/<pid>/stat`; cumulative storage bytes come from `/proc/<pid>/io`. TCP sockets are joined to process file descriptors by inode. This gives correct ownership metadata but no byte-accurate network accounting; RX/TX remain zero in fallback mode.
 

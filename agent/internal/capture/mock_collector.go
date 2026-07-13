@@ -1,4 +1,4 @@
-package collector
+package capture
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vmlens/vmlens/agent/internal/model"
+	"github.com/vmlens/vmlens/agent/internal/telemetry"
 )
 
 type mockDestination struct {
@@ -16,17 +16,17 @@ type mockDestination struct {
 }
 
 type MockCollector struct {
-	registration model.Registration
+	registration telemetry.Registration
 	interval     time.Duration
 	random       *rand.Rand
 }
 
-func NewMock(registration model.Registration, interval time.Duration) *MockCollector {
+func NewMock(registration telemetry.Registration, interval time.Duration) *MockCollector {
 	return &MockCollector{registration: registration, interval: interval, random: rand.New(rand.NewSource(time.Now().UnixNano()))}
 }
 
-func (c *MockCollector) Run(ctx context.Context) (<-chan model.FlowEvent, <-chan error) {
-	events := make(chan model.FlowEvent, 64)
+func (c *MockCollector) Run(ctx context.Context) (<-chan telemetry.FlowEvent, <-chan error) {
+	events := make(chan telemetry.FlowEvent, 64)
 	errors := make(chan error)
 	go func() {
 		defer close(events)
@@ -47,7 +47,7 @@ func (c *MockCollector) Run(ctx context.Context) (<-chan model.FlowEvent, <-chan
 
 func (c *MockCollector) Close() error { return nil }
 
-func (c *MockCollector) event(now time.Time) model.FlowEvent {
+func (c *MockCollector) event(now time.Time) telemetry.FlowEvent {
 	destinations := c.destinations()
 	destination := destinations[c.random.Intn(len(destinations))]
 	bytesReceived := int64(25_000 + c.random.Intn(2_500_000))
@@ -61,7 +61,7 @@ func (c *MockCollector) event(now time.Time) model.FlowEvent {
 	if len(c.registration.Interfaces) > 0 {
 		iface = c.registration.Interfaces[0].Name
 	}
-	return model.FlowEvent{
+	return telemetry.FlowEvent{
 		AgentID: c.registration.AgentID, SrcIP: sourceIP, DstIP: destination.ip,
 		SrcPort: 32000 + c.random.Intn(25000), DstPort: destination.port,
 		Protocol: destination.protocol, Direction: "egress", BytesSent: bytesSent,

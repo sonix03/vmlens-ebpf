@@ -1,4 +1,4 @@
-package model
+package telemetry
 
 type Interface struct {
 	Name       string `json:"name"`

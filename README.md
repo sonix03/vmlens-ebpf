@@ -356,6 +356,8 @@ immediately.
 
 ```text
 agent/        VM agent source and eBPF collector
+  ebpf/       eBPF programs and fallback headers
+  internal/   capture, identity, telemetry, transport and lifecycle packages
 backend/      Go control-plane API and migrations
 frontend/     React dashboard
 scripts/      tunnel, install, release and agent helpers
@@ -363,6 +365,7 @@ configs/      local tunnel/VM profile examples
 configuration/OpenStack cloud-init examples
 instructions/ communication test commands
 docs/         architecture, privacy and prebuilt agent notes
+legacy/       older v1 prototype stack kept for reference
 SONI.txt      tested E2E command flow from zero
 ```
 

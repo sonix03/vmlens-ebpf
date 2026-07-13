@@ -1,42 +1,28 @@
 # Project Structure
 
-VMLens uses professional service names in Docker and documentation, while the
-current source folders remain stable for compatibility.
+VMLens keeps the active product stack at the repository root and moves older
+prototype code into `legacy/`.
 
-## Runtime services
+The root uses `go.work` to group the active Go modules. From the repository
+root, use `make test`; run raw `go test ./...` inside `agent/` or `backend/`.
 
-```text
-dashboard      browser UI on http://localhost:3000
-control-plane  REST API, SSE, graph/status logic on http://localhost:8080
-datastore      PostgreSQL on localhost:5432
-agent          VM-side eBPF telemetry collector
-```
-
-## Source folders
+## Active root folders
 
 ```text
-frontend/      source for the dashboard service
-backend/       source for the control-plane service
-agent/         source for the VM-side telemetry agent
-scripts/       local tunnel and VM agent management scripts
-configs/       local operator configuration examples
-instructions/  copy-paste traffic and setup recipes
-docs/          architecture and operations notes
+agent/          VM-side telemetry agent
+backend/        control-plane API, graph, stats, database migrations
+frontend/       dashboard UI
+scripts/        active operator scripts for tunnels, agent install, release, tests
+configuration/  OpenStack cloud-init / customization scripts
+configs/        local operator config examples
+instructions/   copy-paste communication test recipes
+docs/           architecture and operations notes
+legacy/         old v1 prototype stack, kept for reference
 ```
 
-The folders `frontend/` and `backend/` are intentionally kept for now because
-they are referenced by existing Docker build contexts, module paths, and setup
-history. Prefer these service names in user-facing docs:
+## Local operator config
 
-```text
-frontend  -> dashboard
-backend   -> control-plane
-postgres  -> datastore
-```
-
-## Local operator files
-
-Copy examples before editing local machine-specific values:
+Copy examples before editing machine-specific values:
 
 ```bash
 cp configs/local.env.example configs/local.env
@@ -49,7 +35,7 @@ configs/local.env
 configs/vms.local
 ```
 
-Use `configs/local.env` for local paths and defaults:
+Use `configs/local.env` for local SSH/tunnel defaults:
 
 ```text
 VMLENS_SSH_USER
@@ -66,25 +52,60 @@ VMLENS_TUNNEL_STATE_DIR
 VMLENS_KEY_STATE_DIR
 ```
 
-Example:
+## Agent layout
 
 ```text
-VMLENS_VM_PROFILES="testing_a_1 testing_a_2"
-
-VMLENS_VM_TESTING_A_1_ALIAS=testing-a-1
-VMLENS_VM_TESTING_A_1_HOST=10.20.20.130
-VMLENS_VM_TESTING_A_1_SSH_KEY=-
-
-VMLENS_VM_TESTING_A_2_ALIAS=testing-a-2
-VMLENS_VM_TESTING_A_2_HOST=10.20.20.199
-VMLENS_VM_TESTING_A_2_SSH_KEY=~/.ssh/id_ed25519_vmlens_testing_a_2
+agent/
+  cmd/agent/              process entrypoint
+  ebpf/
+    programs/             kernel-side eBPF C programs
+    include/              fallback headers used by release builds
+    README.md             eBPF build notes
+  internal/
+    capture/              mock, kprobe and TCX capture collectors
+    config/               env-based agent config
+    identity/             VM hostname, machine-id, interface discovery
+    lifecycle/            heartbeat / recovery loop
+    telemetry/            JSON payload types sent to backend
+    transport/            HTTP sender to control-plane
 ```
 
-`configs/vms.local` still exists as a legacy fallback when
-`VMLENS_VM_PROFILES` is empty:
+## Backend layout
 
 ```text
-testing-a-1|10.20.20.130|-|-|-|-
-testing-a-2|10.20.20.199|ubuntu|~/.ssh/id_ed25519_vmlens|-|-
-testing-a-3|10.20.20.188|ubuntu|agent|-|-
+backend/
+  cmd/api/                API process entrypoint
+  internal/api/           HTTP handlers, routes and middleware
+  internal/config/        control-plane config
+  internal/db/            embedded PostgreSQL migrations
+  internal/model/         API/domain DTOs
+  internal/realtime/      SSE hub
+  internal/service/       graph, flow, VM, agent and stats services
 ```
+
+## Frontend layout
+
+```text
+frontend/
+  src/api/                REST/SSE clients
+  src/components/         dashboard components
+  src/styles/             CSS
+  src/types/              TypeScript DTOs
+```
+
+## Legacy layout
+
+```text
+legacy/v1-stack/
+  bpf/       old CO-RE programs
+  cmd/       old CLI entrypoints
+  config/    old YAML config
+  deploy/    old monitoring/deployment files
+  examples/  old traffic/resource demos
+  internal/  old private Go packages
+  pkg/       old public-ish Go packages
+  scripts/   old install/run helpers
+```
+
+Use `legacy/v1-stack/` only for reference or migration work. New work should go
+into the active root folders above.
