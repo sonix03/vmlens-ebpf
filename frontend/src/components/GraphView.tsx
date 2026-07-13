@@ -6,7 +6,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from 'react'
-import type { GraphData, GraphNode } from '../types/graph'
+import type { GraphData, GraphEdge, GraphNode } from '../types/graph'
 
 interface Props {
   graph: GraphData
@@ -26,6 +26,12 @@ const maxZoom = 2.5
 
 type Point = { x: number; y: number }
 type Viewport = Point & { zoom: number }
+type VisualRelationship = {
+  source: string
+  target: string
+  weight: number
+  activeUntil: number
+}
 
 function clampZoom(zoom: number) {
   return Math.min(maxZoom, Math.max(minZoom, zoom))
@@ -41,6 +47,50 @@ function curvedPath(source: Point, target: Point) {
     y: (source.y + target.y) / 2 + (dx / length) * curve,
   }
   return `M ${source.x} ${source.y} Q ${mid.x} ${mid.y} ${target.x} ${target.y}`
+}
+
+function edgePoint(from: Point, to: Point) {
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  const absDx = Math.abs(dx) || 1
+  const absDy = Math.abs(dy) || 1
+  const scale = Math.min((nodeWidth / 2) / absDx, (nodeHeight / 2) / absDy)
+  return {
+    x: from.x + dx * scale,
+    y: from.y + dy * scale,
+  }
+}
+
+function activeUntil(edge: GraphEdge) {
+  const parsedActiveUntil = Date.parse(edge.active_until)
+  if (Number.isFinite(parsedActiveUntil)) return parsedActiveUntil
+  return edge.active ? Date.parse(edge.last_observed_at) + 3000 : 0
+}
+
+function isLikelyEphemeralPort(port: number) {
+  return port >= 32768
+}
+
+function hasOppositeServiceEdge(edge: GraphEdge, edges: GraphEdge[], vmIDs: Set<string>) {
+  if (!isLikelyEphemeralPort(edge.dst_port)) return false
+  return edges.some((candidate) => {
+    if (!vmIDs.has(candidate.source) || !vmIDs.has(candidate.target)) return false
+    return candidate.source === edge.target
+      && candidate.target === edge.source
+      && candidate.protocol === edge.protocol
+      && !isLikelyEphemeralPort(candidate.dst_port)
+  })
+}
+
+function visualDirection(edge: GraphEdge, edges: GraphEdge[], vmIDs: Set<string>) {
+  // TC ingress sees the server receiving packets and can produce a reverse edge
+  // to the client's ephemeral port. For the topology animation, fold that
+  // response-only edge into the opposite service-port edge so the visible arrow
+  // follows the request path: client -> server.
+  if (hasOppositeServiceEdge(edge, edges, vmIDs)) {
+    return { source: edge.target, target: edge.source }
+  }
+  return { source: edge.source, target: edge.target }
 }
 
 function VMIcon() {
@@ -182,21 +232,22 @@ export function GraphView({ graph, onNodeSelect }: Props) {
   const nodeByID = useMemo(() => new Map(nodes.map((item) => [item.node.id, item])), [nodes])
 
   const edges = useMemo(() => {
-    // Several ports/protocols between the same VM pair become one visual edge.
-    // Individual aggregated flows remain available in the backend.
-    const relationships = new Map<string, { source: string; target: string; weight: number; activeUntil: number }>()
+    // Several ports/protocols in the same request direction become one visual
+    // edge. Individual aggregated flows remain available in the backend.
+    const relationships = new Map<string, VisualRelationship>()
     graph.edges.forEach((edge) => {
       if (!vmIDs.has(edge.source) || !vmIDs.has(edge.target)) return
       if (edge.source === edge.target) return
-      const [source, target] = [edge.source, edge.target].sort()
-      const key = `${source}<->${target}`
-      const parsedActiveUntil = Date.parse(edge.active_until)
-      const activeUntil = Number.isFinite(parsedActiveUntil)
-        ? parsedActiveUntil
-        : (edge.active ? Date.parse(edge.last_observed_at) + 3000 : 0)
-      const current = relationships.get(key) || { source, target, weight: 1, activeUntil: 0 }
+      const { source, target } = visualDirection(edge, graph.edges, vmIDs)
+      const key = `${source}->${target}`
+      const current = relationships.get(key) || {
+        source,
+        target,
+        weight: 1,
+        activeUntil: 0,
+      }
       current.weight = Math.max(current.weight, edge.weight)
-      current.activeUntil = Math.max(current.activeUntil, activeUntil)
+      current.activeUntil = Math.max(current.activeUntil, activeUntil(edge))
       relationships.set(key, current)
     })
 
@@ -206,15 +257,15 @@ export function GraphView({ graph, onNodeSelect }: Props) {
       if (!source || !target) return []
       const active = relationship.activeUntil > clock
       const color = active ? '#6fa88b' : '#4a515a'
+      const start = edgePoint(source.center, target.center)
+      const end = edgePoint(target.center, source.center)
       return {
         id,
         active,
         color,
         width: active ? Math.min(4, 1.25 + relationship.weight * 0.4) : 1,
-        opacity: active ? 0.9 : 0.3,
-        // Draw from node center to node center. Nodes are rendered above the SVG,
-        // so the line visually enters each node instead of stopping with a gap.
-        path: curvedPath(source.center, target.center),
+        opacity: active ? 0.95 : 0.36,
+        path: curvedPath(start, end),
       }
     })
   }, [clock, graph.edges, nodeByID, vmIDs])
@@ -257,7 +308,6 @@ export function GraphView({ graph, onNodeSelect }: Props) {
           key={edge.id}
           className={`graph-edge ${edge.active ? 'graph-edge-active' : 'graph-edge-idle'}`}
           d={edge.path}
-          markerStart={`url(#${edge.active ? 'edge-arrow-active' : 'edge-arrow-idle'})`}
           markerEnd={`url(#${edge.active ? 'edge-arrow-active' : 'edge-arrow-idle'})`}
           style={{ stroke: edge.color, strokeWidth: edge.width, opacity: edge.opacity }}
         />)}
