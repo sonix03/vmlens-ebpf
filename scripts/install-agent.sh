@@ -14,6 +14,10 @@ AGENT_PUBLIC_IP="${AGENT_PUBLIC_IP:-}"
 AGENT_IGNORE_IPS="${AGENT_IGNORE_IPS:-}"
 AGENT_ENVIRONMENT="${AGENT_ENVIRONMENT:-external-vm}"
 FLOW_INTERVAL="${FLOW_INTERVAL:-1s}"
+CAPTURE_MODE="${CAPTURE_MODE:-auto}"
+CAPTURE_INTERFACE="${CAPTURE_INTERFACE:-}"
+FLOW_ALLOW_CIDRS="${FLOW_ALLOW_CIDRS:-}"
+FLOW_DENY_CIDRS="${FLOW_DENY_CIDRS:-}"
 
 # auto: use prebuilt files when URLs/paths are provided, otherwise build locally.
 # prebuilt: require prebuilt agent binary and, in real mode, prebuilt eBPF object.
@@ -156,10 +160,14 @@ MOCK_MODE=${MOCK_MODE}
 BPF_OBJECT=/usr/lib/vmlens/flow_tracker.bpf.o
 HEARTBEAT_INTERVAL=20s
 FLOW_INTERVAL=${FLOW_INTERVAL}
+CAPTURE_MODE=${CAPTURE_MODE}
+CAPTURE_INTERFACE=${CAPTURE_INTERFACE}
 TENANT_ID=${TENANT_ID}
 AGENT_PRIVATE_IPS=${AGENT_PRIVATE_IPS}
 AGENT_PUBLIC_IP=${AGENT_PUBLIC_IP}
 IGNORE_IPS=${AGENT_IGNORE_IPS}
+FLOW_ALLOW_CIDRS=${FLOW_ALLOW_CIDRS}
+FLOW_DENY_CIDRS=${FLOW_DENY_CIDRS}
 AGENT_ENVIRONMENT=${AGENT_ENVIRONMENT}
 EOF
 chmod 0640 /etc/vmlens/agent.env
@@ -177,6 +185,8 @@ ExecStart=/usr/local/bin/vmlens-agent
 Restart=always
 RestartSec=5
 User=root
+AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_NET_ADMIN CAP_NET_RAW CAP_SYS_ADMIN
 NoNewPrivileges=false
 ProtectHome=true
 PrivateTmp=true

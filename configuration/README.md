@@ -74,5 +74,19 @@ REPO_URL
 RELEASE_BASE_URL
 BACKEND_URL
 FLOW_INTERVAL
+CAPTURE_MODE
+CAPTURE_INTERFACE
 AGENT_IGNORE_IPS
+FLOW_ALLOW_CIDRS
+FLOW_DENY_CIDRS
 ```
+
+Recommended OpenStack network capture values:
+
+```text
+CAPTURE_MODE=tc
+CAPTURE_INTERFACE=ens3
+```
+
+If `ens3` does not exist, the provided cloud-init scripts automatically fall
+back to the VM default-route interface.

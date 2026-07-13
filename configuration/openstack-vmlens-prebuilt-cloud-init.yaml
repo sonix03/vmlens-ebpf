@@ -19,7 +19,11 @@ write_files:
       BACKEND_URL="http://127.0.0.1:18080"
       MOCK_MODE="false"
       FLOW_INTERVAL="1s"
+      CAPTURE_MODE="tc"
+      CAPTURE_INTERFACE="ens3"
       AGENT_IGNORE_IPS=""
+      FLOW_ALLOW_CIDRS=""
+      FLOW_DENY_CIDRS=""
 
       RELEASE_BASE_URL="https://github.com/sonix03/vmlens-ebpf/releases/latest/download"
       INSTALL_SCRIPT_URL="${RELEASE_BASE_URL}/install-agent.sh"
@@ -35,7 +39,13 @@ write_files:
 
       export DEBIAN_FRONTEND=noninteractive
       apt-get update
-      apt-get install -y ca-certificates curl
+      apt-get install -y ca-certificates curl iproute2
+
+      if ! ip link show "$CAPTURE_INTERFACE" >/dev/null 2>&1; then
+        CAPTURE_INTERFACE="$(ip route show default | awk '{print $5; exit}')"
+      fi
+      [[ -n "$CAPTURE_INTERFACE" ]] || { echo "capture interface is empty" >&2; exit 1; }
+      ip -brief address show "$CAPTURE_INTERFACE"
 
       [[ -r /sys/kernel/btf/vmlinux ]] || { echo "kernel BTF /sys/kernel/btf/vmlinux is required" >&2; exit 1; }
 
@@ -49,7 +59,11 @@ write_files:
         BACKEND_URL="$BACKEND_URL" \
         MOCK_MODE="$MOCK_MODE" \
         FLOW_INTERVAL="$FLOW_INTERVAL" \
+        CAPTURE_MODE="$CAPTURE_MODE" \
+        CAPTURE_INTERFACE="$CAPTURE_INTERFACE" \
         AGENT_IGNORE_IPS="$AGENT_IGNORE_IPS" \
+        FLOW_ALLOW_CIDRS="$FLOW_ALLOW_CIDRS" \
+        FLOW_DENY_CIDRS="$FLOW_DENY_CIDRS" \
         bash /usr/local/sbin/vmlens-install-agent.sh
 
       systemctl is-active vmlens-agent

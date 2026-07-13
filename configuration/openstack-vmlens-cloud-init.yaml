@@ -22,10 +22,14 @@ write_files:
       BACKEND_URL="http://127.0.0.1:18080"
       MOCK_MODE="false"
       FLOW_INTERVAL="1s"
+      CAPTURE_MODE="tc"
+      CAPTURE_INTERFACE="ens3"
 
       # Optional. Add local/tunnel/control-plane IPs here if they should not be tracked.
       # Example: AGENT_IGNORE_IPS="10.20.20.125"
       AGENT_IGNORE_IPS=""
+      FLOW_ALLOW_CIDRS=""
+      FLOW_DENY_CIDRS=""
 
       export DEBIAN_FRONTEND=noninteractive
       export HOME="/root"
@@ -35,7 +39,13 @@ write_files:
       mkdir -p "$GOMODCACHE" "$GOCACHE"
 
       apt-get update
-      apt-get install -y ca-certificates git golang-go clang libbpf-dev linux-tools-common
+      apt-get install -y ca-certificates git golang-go clang libbpf-dev linux-tools-common iproute2
+
+      if ! ip link show "$CAPTURE_INTERFACE" >/dev/null 2>&1; then
+        CAPTURE_INTERFACE="$(ip route show default | awk '{print $5; exit}')"
+      fi
+      [[ -n "$CAPTURE_INTERFACE" ]] || { echo "capture interface is empty" >&2; exit 1; }
+      ip -brief address show "$CAPTURE_INTERFACE"
 
       apt-get install -y "linux-tools-$(uname -r)" || true
       apt-get install -y bpftool || true
@@ -60,7 +70,11 @@ write_files:
         BACKEND_URL="$BACKEND_URL" \
         MOCK_MODE="$MOCK_MODE" \
         FLOW_INTERVAL="$FLOW_INTERVAL" \
+        CAPTURE_MODE="$CAPTURE_MODE" \
+        CAPTURE_INTERFACE="$CAPTURE_INTERFACE" \
         AGENT_IGNORE_IPS="$AGENT_IGNORE_IPS" \
+        FLOW_ALLOW_CIDRS="$FLOW_ALLOW_CIDRS" \
+        FLOW_DENY_CIDRS="$FLOW_DENY_CIDRS" \
         HOME="$HOME" \
         GOPATH="$GOPATH" \
         GOMODCACHE="$GOMODCACHE" \
