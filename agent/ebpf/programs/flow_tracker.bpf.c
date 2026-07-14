@@ -8,17 +8,7 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 
-#define DIR_INGRESS 1
-#define DIR_EGRESS 2
-#define IPPROTO_TCP_VALUE 6
-#define IPPROTO_UDP_VALUE 17
-#define AF_INET_VALUE 2
-#define AF_INET6_VALUE 10
-#define ETH_P_IP_VALUE 0x0800
-#define ETH_P_IPV6_VALUE 0x86DD
-#define TC_ACT_OK 0
-#define TCP_SYN 0x02
-#define TCP_ACK 0x10
+#include "flow_defs.h"
 
 struct flow_event {
     __u64 timestamp_ns;
