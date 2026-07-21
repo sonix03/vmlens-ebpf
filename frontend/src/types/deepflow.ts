@@ -21,6 +21,8 @@ export interface DeepFlowEdge {
   source_role: string
   dest_role: string
   direction: 'internal_internal' | 'internal_external' | 'external_internal' | string
+  kind?: 'traffic' | 'reachability' | string
+  reachable?: boolean
   protocol: string
   server_port: number
   request_count: number

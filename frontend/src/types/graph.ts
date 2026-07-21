@@ -32,6 +32,8 @@ export interface GraphEdge {
   active: boolean
   active_until: string
   weight: number
+  kind?: 'traffic' | 'reachability' | string
+  reachable?: boolean
   source_ip?: string
   dest_ip?: string
   source_role?: string

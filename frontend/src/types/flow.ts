@@ -15,7 +15,7 @@ export interface Flow {
   dst_ip: string
   src_port: number
   dst_port: number
-  protocol: 'tcp' | 'udp'
+  protocol: 'tcp' | 'udp' | 'icmp'
   direction: 'ingress' | 'egress'
   scope: FlowScope
   bytes_sent: number

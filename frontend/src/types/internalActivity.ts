@@ -14,7 +14,7 @@ export interface InternalActivity {
   destination_vm_id?: string
   destination_name: string
   destination_ip: string
-  protocol: 'tcp' | 'udp'
+  protocol: 'tcp' | 'udp' | 'icmp'
   direction: 'ingress' | 'egress'
   scope: FlowScope
   service: string

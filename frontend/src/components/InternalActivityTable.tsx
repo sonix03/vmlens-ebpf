@@ -34,7 +34,7 @@ export function InternalActivityTable({ activity }: { activity: InternalActivity
             <td><div className="activity-frequency"><span>{item.request_count} req</span><small>{item.requests_per_second.toFixed(2)} req/s · {item.connections_per_second.toFixed(2)} conn/s</small></div></td>
             <td>{endpoint(item.observer_name, item.observer_ip)}</td>
           </tr>)}
-          {activity.length === 0 && <tr><td colSpan={7} className="activity-empty">Waiting for internal TCP/UDP activity…</td></tr>}
+          {activity.length === 0 && <tr><td colSpan={7} className="activity-empty">Waiting for internal VM activity…</td></tr>}
         </tbody>
       </table>
     </div>

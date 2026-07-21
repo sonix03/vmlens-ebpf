@@ -1,30 +1,32 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './api/client'
 import { connectRealtime } from './api/realtime'
-import { DeepFlowFlowTable } from './components/DeepFlowFlowTable'
+import { DeepFlowFlowTable, type DeepFlowTableMode } from './components/DeepFlowFlowTable'
 import { GraphView } from './components/GraphView'
 import { InternalActivityTable } from './components/InternalActivityTable'
 import { NodeDetailsPanel } from './components/NodeDetailsPanel'
 import { StatCards } from './components/StatCards'
 import type { Flow } from './types/flow'
-import type { DeepFlowHealth, DeepFlowRawLogs, DeepFlowTopology } from './types/deepflow'
+import type { DeepFlowHealth, DeepFlowRawLogs } from './types/deepflow'
 import type { GraphData, GraphEdge, GraphFilters, GraphNode } from './types/graph'
 import type { InternalActivity } from './types/internalActivity'
 import type { Summary } from './types/stats'
 import type { VM } from './types/vm'
 
 const graphWindow: GraphFilters = {
-  vm_id: '', scope: '', protocol: '', port: '', time_range: '24h', min_bytes: '', status: '',
+  vm_id: '', scope: '', protocol: '', port: '', time_range: '5m', min_bytes: '', status: '',
 }
 
 const activeWindowMs = 3000
+const canonicalRefreshDelayMs = 1000
+type ActivityView = 'internal' | DeepFlowTableMode
 
 function isFlow(value: unknown): value is Flow {
   if (!value || typeof value !== 'object') return false
   const flow = value as Partial<Flow>
   return typeof flow.src_ip === 'string'
     && typeof flow.dst_ip === 'string'
-    && (flow.protocol === 'tcp' || flow.protocol === 'udp')
+    && (flow.protocol === 'tcp' || flow.protocol === 'udp' || flow.protocol === 'icmp')
     && typeof flow.dst_port === 'number'
     && typeof flow.bytes_sent === 'number'
     && typeof flow.bytes_received === 'number'
@@ -157,68 +159,12 @@ function mergeGraphData(current: GraphData, next: GraphData): GraphData {
   }
 }
 
-function deepFlowScope(direction: string) {
-  if (direction === 'internal_internal') return 'internal_same_tenant'
-  if (direction === 'internal_external' || direction === 'external_internal') return 'external_public'
-  return 'unknown'
-}
-
-function deepFlowNodeType(type: string): GraphNode['type'] {
-  if (type === 'vm' || type === 'external' || type === 'unknown_internal' || type === 'unknown') return type
-  return 'unknown'
-}
-
-function deepFlowToGraphData(topology: DeepFlowTopology): GraphData {
-  const nodes: GraphNode[] = topology.nodes.map((node) => ({
-    id: node.id,
-    type: deepFlowNodeType(node.type),
-    label: node.label,
-    ip: node.ip,
-    status: node.status || node.type,
-    tenant_id: node.tenant_id,
-    role: node.role,
-    traffic_in: 0,
-    traffic_out: 0,
-  }))
-  const edges: GraphEdge[] = topology.edges.map((edge) => {
-    const lastSeen = edge.last_seen || topology.generated_at
-    const observedAt = lastSeen
-    const totalBytes = edge.total_bytes ?? 0
-    return {
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      protocol: edge.protocol || 'tcp',
-      dst_port: edge.server_port,
-      scope: deepFlowScope(edge.direction),
-      bytes_sent: totalBytes,
-      bytes_received: 0,
-      packets: 0,
-      connection_count: 0,
-      request_count: edge.request_count,
-      first_seen: lastSeen,
-      last_seen: lastSeen,
-      last_observed_at: observedAt,
-      active: Date.now() - Date.parse(lastSeen) <= activeWindowMs,
-      active_until: new Date(Date.parse(lastSeen) + activeWindowMs).toISOString(),
-      weight: edgeWeight(totalBytes),
-      source_ip: edge.source_ip,
-      dest_ip: edge.dest_ip,
-      source_role: edge.source_role,
-      dest_role: edge.dest_role,
-      direction: edge.direction,
-      server_port: edge.server_port,
-      error_count: edge.error_count,
-      total_bytes: totalBytes,
-      avg_rtt_ms: edge.avg_rtt_ms,
-      p95_rtt_ms: edge.p95_rtt_ms,
-      avg_response_duration_ms: edge.avg_response_duration_ms,
-      last_response_code: edge.last_response_code,
-      agent_ids: edge.agent_ids,
-      observation_points: edge.observation_points,
-    }
-  })
-  return { nodes, edges }
+function vmTopologyOnly(graph: GraphData): GraphData {
+  const vmIDs = new Set(graph.nodes.filter((node) => node.type === 'vm').map((node) => node.id))
+  return {
+    nodes: graph.nodes.filter((node) => vmIDs.has(node.id)),
+    edges: graph.edges.filter((edge) => vmIDs.has(edge.source) && vmIDs.has(edge.target) && edge.source !== edge.target),
+  }
 }
 
 function applyLiveFlow(graph: GraphData, flow: Flow, observedAt: string): GraphData {
@@ -257,6 +203,7 @@ function applyLiveFlow(graph: GraphData, flow: Flow, observedAt: string): GraphD
     active: true,
     active_until: new Date(Date.parse(observedAt) + activeWindowMs).toISOString(),
     weight: edgeWeight(bytesSent + bytesReceived),
+    kind: 'traffic',
   }
   const edges = index >= 0
     ? graph.edges.map((item, edgeIndex) => edgeIndex === index ? edge : item)
@@ -279,33 +226,51 @@ export function App() {
   const [internalActivity, setInternalActivity] = useState<InternalActivity[]>([])
   const [deepFlowRaw, setDeepFlowRaw] = useState<DeepFlowRawLogs>()
   const [deepFlowHealth, setDeepFlowHealth] = useState<DeepFlowHealth>()
+  const [activityView, setActivityView] = useState<ActivityView>('internal')
   const [selectedNode, setSelectedNode] = useState<GraphNode>()
   const [connected, setConnected] = useState(false)
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const refreshTimer = useRef<number>()
   const vmInventory = useRef<GraphNode[]>([])
 
-  const load = useCallback(async () => {
-    const [nextGraph, nextDeepFlowGraph, nextDeepFlowRaw, nextDeepFlowHealth, nextSummary, nextActivity, nextVMs] = await Promise.allSettled([
-      api.graph(graphWindow), api.deepFlowGraph(graphWindow), api.deepFlowRaw(graphWindow), api.deepFlowHealth(), api.summary(), api.internalActivity(), api.vms(),
-    ])
-    if (nextVMs.status === 'fulfilled') {
-      vmInventory.current = nextVMs.value.map(vmToGraphNode)
+  useEffect(() => {
+    const previousScrollRestoration = window.history.scrollRestoration
+    window.history.scrollRestoration = 'manual'
+    const resetScroll = () => {
+      window.scrollTo({ left: 0, top: 0 })
+      document.scrollingElement?.scrollTo({ left: 0, top: 0 })
     }
+    resetScroll()
+    const resetInterval = window.setInterval(resetScroll, 100)
+    const stopReset = window.setTimeout(() => window.clearInterval(resetInterval), 2500)
+    return () => {
+      window.clearInterval(resetInterval)
+      window.clearTimeout(stopReset)
+      window.history.scrollRestoration = previousScrollRestoration
+    }
+  }, [])
+
+  const loadDeepFlow = useCallback(async () => {
+    const [nextDeepFlowRaw, nextDeepFlowHealth] = await Promise.allSettled([
+      api.deepFlowRaw(graphWindow), api.deepFlowHealth(),
+    ])
+
     if (nextDeepFlowRaw.status === 'fulfilled') {
       setDeepFlowRaw(nextDeepFlowRaw.value)
     }
     if (nextDeepFlowHealth.status === 'fulfilled') {
       setDeepFlowHealth(nextDeepFlowHealth.value)
     }
-    const deepFlowUsable = nextDeepFlowGraph.status === 'fulfilled'
-      && (nextDeepFlowGraph.value.edges.length > 0
-        || (nextDeepFlowHealth.status === 'fulfilled' && nextDeepFlowHealth.value.clickhouse_reachable))
-    if (deepFlowUsable) {
-      setGraph((current) => mergeVMInventory(mergeGraphData(current, deepFlowToGraphData(nextDeepFlowGraph.value)), vmInventory.current))
-      setError('')
-    } else if (nextGraph.status === 'fulfilled') {
+  }, [])
+
+  const load = useCallback(async () => {
+    const [nextGraph, nextSummary, nextActivity, nextVMs] = await Promise.allSettled([
+      api.graph(graphWindow), api.summary(), api.internalActivity(), api.vms(),
+    ])
+    if (nextVMs.status === 'fulfilled') {
+      vmInventory.current = nextVMs.value.map(vmToGraphNode)
+    }
+    if (nextGraph.status === 'fulfilled') {
       setGraph((current) => mergeVMInventory(mergeGraphData(current, nextGraph.value), vmInventory.current))
       setError('')
     } else {
@@ -320,8 +285,8 @@ export function App() {
     if (nextActivity.status === 'fulfilled') {
       setInternalActivity(nextActivity.value)
     }
-    setLoading(false)
-  }, [])
+    void loadDeepFlow()
+  }, [loadDeepFlow])
 
   useEffect(() => {
     void load()
@@ -343,7 +308,7 @@ export function App() {
         refreshTimer.current = window.setTimeout(() => {
           refreshTimer.current = undefined
           void load()
-        }, 300)
+        }, canonicalRefreshDelayMs)
       }
     }, setConnected)
     return () => {
@@ -359,13 +324,19 @@ export function App() {
     else if (currentNode !== selectedNode) setSelectedNode(currentNode)
   }, [graph.nodes, selectedNode])
 
-  const vmCount = graph.nodes.filter((node) => node.type === 'vm').length
-  const vmIDs = new Set(graph.nodes.filter((node) => node.type === 'vm').map((node) => node.id))
+  const displayGraph = useMemo(() => vmTopologyOnly(graph), [graph])
+  const vmCount = displayGraph.nodes.filter((node) => node.type === 'vm').length
+  const vmIDs = new Set(displayGraph.nodes.filter((node) => node.type === 'vm').map((node) => node.id))
   const relationshipCount = new Set(
-    graph.edges
+    displayGraph.edges
       .filter((edge) => vmIDs.has(edge.source) && vmIDs.has(edge.target) && edge.source !== edge.target)
       .map((edge) => [edge.source, edge.target].sort().join('<->')),
   ).size
+  const tableTabs: Array<{ id: ActivityView; label: string; count: number }> = [
+    { id: 'internal', label: 'Internal Activity', count: internalActivity.length },
+    { id: 'l4', label: 'L4 Flows', count: deepFlowRaw?.l4.length ?? 0 },
+    { id: 'l7', label: 'L7 Requests', count: deepFlowRaw?.l7.length ?? 0 },
+  ]
 
   return <main className="app-shell">
     <header className="app-header">
@@ -377,14 +348,30 @@ export function App() {
       <div className="graph-card">
         <div className="graph-heading">
           <div><small>VM TOPOLOGY</small></div>
-          <div className="legend"><span className="vm-dot">Virtual machine</span><span className="edge-line active-line">Active traffic</span><span className="edge-line idle-line">Idle history</span></div>
+          <div className="legend"><span className="vm-dot">Virtual machine</span><span className="edge-line active-line">Active traffic</span><span className="edge-line idle-line">Idle history</span><span className="edge-line reachability-line">Reachable</span></div>
         </div>
-        {loading ? <div className="loading">Loading live topology...</div> : <GraphView graph={graph} onNodeSelect={setSelectedNode} />}
+        <GraphView graph={displayGraph} onNodeSelect={setSelectedNode} />
       </div>
       {selectedNode && <NodeDetailsPanel node={selectedNode} onClose={() => setSelectedNode(undefined)} />}
     </section>
-    <InternalActivityTable activity={internalActivity} />
-    <DeepFlowFlowTable raw={deepFlowRaw} health={deepFlowHealth} />
+    <section className="activity-switcher">
+      <div className="activity-tabs" role="tablist" aria-label="Telemetry tables">
+        {tableTabs.map((tab) => <button
+          key={tab.id}
+          type="button"
+          role="tab"
+          aria-selected={activityView === tab.id}
+          className={`activity-tab${activityView === tab.id ? ' active' : ''}`}
+          onClick={() => setActivityView(tab.id)}
+        >
+          <span>{tab.label}</span>
+          <small>{tab.count}</small>
+        </button>)}
+      </div>
+      {activityView === 'internal'
+        ? <InternalActivityTable activity={internalActivity} />
+        : <DeepFlowFlowTable raw={deepFlowRaw} health={deepFlowHealth} mode={activityView} />}
+    </section>
     <footer><span></span><span>{vmCount} VMs · {relationshipCount} relationships</span></footer>
   </main>
 }

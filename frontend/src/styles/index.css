@@ -1,6 +1,8 @@
 :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0b0e12; color: #e5e7eb; font-synthesis: none; }
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; min-height: 100vh; background: #0b0e12; }
+html { min-width: 320px; min-height: 100%; overflow-x: hidden; background: #0b0e12; }
+body { margin: 0; min-width: 320px; min-height: 100vh; overflow-x: hidden; background: #0b0e12; }
+#root { min-height: 100vh; }
 button, input, select { font: inherit; }
 .app-shell { width: min(1600px, 100%); min-height: 100vh; margin: 0 auto; padding: 0 24px 24px; }
 .app-header { height: 56px; display: flex; align-items: center; justify-content: flex-end; border-bottom: 1px solid #252a31; }
@@ -15,8 +17,12 @@ button, input, select { font: inherit; }
 .graph-edges { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .graph-edge { fill: none; stroke-linecap: round; transition: opacity .18s ease, stroke .18s ease, stroke-width .18s ease; }
 .graph-edge-label { fill: #aab2bc; paint-order: stroke; stroke: #0b1016; stroke-width: 4px; stroke-linejoin: round; font: 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; pointer-events: none; }
-.graph-edge-active { stroke-dasharray: 10 8; filter: drop-shadow(0 0 5px #6fa88b99); animation: graph-edge-flow .7s linear infinite; }
+.graph-edge-connection { stroke: #4a515a; }
+.graph-edge-reachability { stroke: #79add1; stroke-dasharray: 8 7; animation: none; }
+.graph-edge-active { stroke: #6fa88b; stroke-dasharray: 10 8; opacity: .95; filter: drop-shadow(0 0 5px #6fa88b99); animation: graph-edge-flow .7s linear infinite; }
+.graph-edge-reverse { animation-name: graph-edge-flow-reverse; }
 @keyframes graph-edge-flow { to { stroke-dashoffset: -18; } }
+@keyframes graph-edge-flow-reverse { to { stroke-dashoffset: 18; } }
 .graph-controls { position: absolute; z-index: 12; right: 14px; bottom: 14px; display: flex; align-items: center; gap: 6px; padding: 6px; border: 1px solid #343b45; border-radius: 6px; background: #111820d9; box-shadow: 0 10px 26px #0007; backdrop-filter: blur(8px); }
 .graph-controls button { min-width: 34px; height: 30px; padding: 0 10px; border: 1px solid #3a4652; border-radius: 4px; background: #1a222b; color: #d7dde5; cursor: pointer; }
 .graph-controls button:hover { background: #24303a; border-color: #526170; }
@@ -26,6 +32,15 @@ button, input, select { font: inherit; }
 .status-badge,.scope-pill { display: inline-block; padding: 3px 7px; border-radius: 3px; font: 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-transform: uppercase; }.status-online { color: #76bd91; background: #355343; }.status-stale { color: #d0aa68; background: #4b3b23; }.status-offline { color: #b0b6be; background: #30363d; }.status-unknown,.status-external { color: #aab2bc; background: #30363d; }.scope-pill { color: #94aec7; background: #293847; }
 .error-banner { display: flex; gap: 12px; margin: 12px 0; padding: 10px 14px; border: 1px solid #713b3b; border-radius: 4px; background: #291717; font-size: 11px; }.error-banner span { color: #e6a2a2; }
 .activity-card { margin-top: 12px; border: 1px solid #252b33; border-radius: 4px; background: #0f141a; overflow: hidden; }
+.activity-switcher { margin-top: 12px; }
+.activity-tabs { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px; border: 1px solid #252b33; border-radius: 4px; background: #0f141a; }
+.activity-tab { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 12px; border: 1px solid #343b45; border-radius: 4px; background: #151a20; color: #9ba5b1; cursor: pointer; }
+.activity-tab:hover { border-color: #4b5663; background: #1a2129; color: #d3d9e0; }
+.activity-tab.active { border-color: #4d725e; background: #21372b; color: #e9f2ed; }
+.activity-tab span { font-size: 11px; font-weight: 600; }
+.activity-tab small { min-width: 22px; padding: 2px 6px; border-radius: 999px; background: #252b33; color: #8b949e; font: 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-align: center; }
+.activity-tab.active small { background: #355343; color: #cfe9d8; }
+.activity-switcher .activity-card { margin-top: 8px; }
 .activity-heading { min-height: 54px; padding: 11px 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #252b33; color: #7f8995; font-size: 10px; }
 .activity-heading div { display: grid; gap: 3px; }.activity-heading small { color: #aab2bc; font: 600 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .08em; }.activity-heading div span { color: #697380; }
 .activity-table-wrap { max-height: 390px; overflow: auto; }.activity-table { width: 100%; border-collapse: collapse; table-layout: auto; font-size: 11px; }.activity-table th { position: sticky; z-index: 1; top: 0; padding: 9px 12px; border-bottom: 1px solid #252b33; color: #727d89; background: #11161c; font-size: 9px; font-weight: 600; letter-spacing: .06em; text-align: left; text-transform: uppercase; }.activity-table td { padding: 10px 12px; border-bottom: 1px solid #1e242b; vertical-align: middle; }.activity-table tbody tr:last-child td { border-bottom: 0; }.activity-table tbody tr:hover { background: #141a20; }
@@ -35,6 +50,7 @@ button, input, select { font: inherit; }
 footer { display: flex; justify-content: space-between; margin-top: 13px; color: #536176; font-size: 10px; }
 .legend .edge-line::before { width: 18px; height: 1px; border-radius: 0; vertical-align: middle; background: #6fa88b; }
 .legend .idle-line::before { background: #4a515a; opacity: .8; }
+.legend .reachability-line::before { background: transparent; border-top: 1px dashed #79add1; }
 .react-flow__edge.traffic-idle .react-flow__edge-path { transition: stroke .2s ease, opacity .2s ease; }
 .graph-node-button { position: absolute; z-index: 2; width: 270px; min-height: 64px; padding: 12px 22px; border: 1px solid #55a979; border-radius: 999px; outline: none; background: #252a30; color: #f1f3f5; box-shadow: 0 10px 26px #0005; cursor: pointer; touch-action: manipulation; user-select: none; transition: border-color .15s ease, background-color .15s ease, opacity .15s ease, transform .15s ease; }
 .graph-node-button:hover { background: #2a3035; transform: translateY(-1px); }

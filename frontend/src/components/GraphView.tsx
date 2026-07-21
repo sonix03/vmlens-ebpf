@@ -4,7 +4,6 @@ import {
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
-  type WheelEvent as ReactWheelEvent,
 } from 'react'
 import type { GraphData, GraphEdge, GraphNode } from '../types/graph'
 
@@ -29,8 +28,15 @@ type Viewport = Point & { zoom: number }
 type VisualRelationship = {
   source: string
   target: string
+  forwardKey: string
+  reverseKey: string
+  hasForward: boolean
+  hasReverse: boolean
+  hasTraffic: boolean
+  hasReachability: boolean
+  activeForwardUntil: number
+  activeReverseUntil: number
   weight: number
-  activeUntil: number
   totalBytes: number
   requestCount: number
   errorCount: number
@@ -147,6 +153,10 @@ function formatCompactBytes(value: number) {
   return `${value}B`
 }
 
+function relationshipKey(source: string, target: string) {
+  return [source, target].sort().join('<->')
+}
+
 export function GraphView({ graph, onNodeSelect }: Props) {
   const [clock, setClock] = useState(() => Date.now())
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 })
@@ -185,12 +195,6 @@ export function GraphView({ graph, onNodeSelect }: Props) {
     const rect = canvasRef.current?.getBoundingClientRect()
     if (!rect) return
     zoomAt({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }, viewport.zoom * factor)
-  }
-
-  function handleWheel(event: ReactWheelEvent<HTMLDivElement>) {
-    event.preventDefault()
-    const factor = event.deltaY < 0 ? 1.12 : 0.88
-    zoomAt({ x: event.clientX, y: event.clientY }, viewport.zoom * factor)
   }
 
   function handlePanPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
@@ -249,29 +253,53 @@ export function GraphView({ graph, onNodeSelect }: Props) {
   const nodeByID = useMemo(() => new Map(nodes.map((item) => [item.node.id, item])), [nodes])
 
   const edges = useMemo(() => {
-    // Several ports/protocols in the same request direction become one visual
-    // edge. Individual aggregated flows remain available in the backend.
+    // Several ports/protocols between the same two nodes become one visual
+    // relationship. The base line represents known connectivity/history.
+    // Active overlays show traffic direction on the same geometry.
     const relationships = new Map<string, VisualRelationship>()
     graph.edges.forEach((edge) => {
       if (edge.source === edge.target) return
       if (!nodeIDs.has(edge.source) || !nodeIDs.has(edge.target)) return
       const { source, target } = visualDirection(edge, graph.edges, nodeIDs)
-      const key = `${source}->${target}`
+      const key = relationshipKey(source, target)
+      const [endpointA, endpointB] = key.split('<->')
+      const forwardKey = `${endpointA}->${endpointB}`
+      const reverseKey = `${endpointB}->${endpointA}`
+      const directionKey = `${source}->${target}`
       const current = relationships.get(key) || {
-        source,
-        target,
+        source: endpointA,
+        target: endpointB,
+        forwardKey,
+        reverseKey,
+        hasForward: false,
+        hasReverse: false,
+        hasTraffic: false,
+        hasReachability: false,
+        activeForwardUntil: 0,
+        activeReverseUntil: 0,
         weight: 1,
-        activeUntil: 0,
         totalBytes: 0,
         requestCount: 0,
         errorCount: 0,
         avgRTTMs: 0,
       }
-      current.weight = Math.max(current.weight, edge.weight)
-      current.activeUntil = Math.max(current.activeUntil, activeUntil(edge))
-      current.totalBytes += edge.total_bytes ?? edge.bytes_sent + edge.bytes_received
-      current.requestCount += edge.request_count ?? 0
-      current.errorCount += edge.error_count ?? 0
+      const isReachability = edge.kind === 'reachability' || edge.reachable === true || edge.protocol === 'icmp'
+      const until = isReachability ? 0 : activeUntil(edge)
+      current.hasTraffic = current.hasTraffic || !isReachability
+      current.hasReachability = current.hasReachability || isReachability
+      if (directionKey === forwardKey) {
+        current.hasForward = true
+        current.activeForwardUntil = Math.max(current.activeForwardUntil, until)
+      } else {
+        current.hasReverse = true
+        current.activeReverseUntil = Math.max(current.activeReverseUntil, until)
+      }
+      if (!isReachability) {
+        current.weight = Math.max(current.weight, edge.weight)
+        current.totalBytes += edge.total_bytes ?? edge.bytes_sent + edge.bytes_received
+        current.requestCount += edge.request_count ?? 0
+        current.errorCount += edge.error_count ?? 0
+      }
       current.avgRTTMs = Math.max(current.avgRTTMs, edge.avg_rtt_ms ?? 0)
       relationships.set(key, current)
     })
@@ -280,22 +308,31 @@ export function GraphView({ graph, onNodeSelect }: Props) {
       const source = nodeByID.get(relationship.source)
       const target = nodeByID.get(relationship.target)
       if (!source || !target) return []
-      const active = relationship.activeUntil > clock
-      const color = active ? '#6fa88b' : '#4a515a'
+      const activeForward = relationship.activeForwardUntil > clock
+      const activeReverse = relationship.activeReverseUntil > clock
+      const active = activeForward || activeReverse
+      const reachabilityOnly = relationship.hasReachability && !relationship.hasTraffic
       const start = edgePoint(source.center, target.center)
       const end = edgePoint(target.center, source.center)
-      const label = [
-        formatCompactBytes(relationship.totalBytes),
-        relationship.requestCount ? `${relationship.requestCount} req` : '',
-        relationship.avgRTTMs ? `${relationship.avgRTTMs.toFixed(1)}ms` : '',
-        relationship.errorCount ? `${relationship.errorCount} err` : '',
-      ].filter(Boolean).join(' · ')
+      const label = reachabilityOnly
+        ? ['reachable', relationship.hasForward && relationship.hasReverse ? '2-way' : '', relationship.avgRTTMs ? `${relationship.avgRTTMs.toFixed(1)}ms` : ''].filter(Boolean).join(' · ')
+        : [
+          formatCompactBytes(relationship.totalBytes),
+          relationship.requestCount ? `${relationship.requestCount} req` : '',
+          relationship.hasForward && relationship.hasReverse ? '2-way' : '',
+          relationship.hasReachability ? 'reachable' : '',
+          relationship.avgRTTMs ? `${relationship.avgRTTMs.toFixed(1)}ms` : '',
+          relationship.errorCount ? `${relationship.errorCount} err` : '',
+        ].filter(Boolean).join(' · ')
       return {
         id,
         active,
-        color,
-        width: active ? Math.min(4, 1.25 + relationship.weight * 0.4) : 1,
-        opacity: active ? 0.95 : 0.36,
+        reachabilityOnly,
+        activeForward,
+        activeReverse,
+        hasForward: relationship.hasForward,
+        hasReverse: relationship.hasReverse,
+        width: Math.min(4, 1.25 + relationship.weight * 0.4),
         path: curvedPath(start, end),
         label,
         labelX: (start.x + end.x) / 2,
@@ -313,7 +350,6 @@ export function GraphView({ graph, onNodeSelect }: Props) {
   return <div
     ref={canvasRef}
     className={`graph-canvas${panning ? ' panning' : ''}`}
-    onWheel={handleWheel}
     onPointerDown={handlePanPointerDown}
     onPointerMove={handlePanPointerMove}
     onPointerUp={finishPan}
@@ -337,14 +373,32 @@ export function GraphView({ graph, onNodeSelect }: Props) {
           <marker id="edge-arrow-idle" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
             <path d="M 1 1 L 9 5 L 1 9 z" fill="#4a515a" />
           </marker>
+          <marker id="edge-arrow-reachability" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
+            <path d="M 1 1 L 9 5 L 1 9 z" fill="#79add1" />
+          </marker>
         </defs>
         {edges.map((edge) => <path
           key={edge.id}
-          className={`graph-edge ${edge.active ? 'graph-edge-active' : 'graph-edge-idle'}`}
+          className={`graph-edge graph-edge-connection ${edge.reachabilityOnly ? 'graph-edge-reachability' : 'graph-edge-idle'}`}
           d={edge.path}
-          markerEnd={`url(#${edge.active ? 'edge-arrow-active' : 'edge-arrow-idle'})`}
-          style={{ stroke: edge.color, strokeWidth: edge.width, opacity: edge.opacity }}
+          markerStart={edge.hasReverse ? `url(#${edge.reachabilityOnly ? 'edge-arrow-reachability' : 'edge-arrow-idle'})` : undefined}
+          markerEnd={edge.hasForward ? `url(#${edge.reachabilityOnly ? 'edge-arrow-reachability' : 'edge-arrow-idle'})` : undefined}
+          style={{ strokeWidth: edge.reachabilityOnly ? 1.25 : edge.active ? Math.max(1.25, edge.width * 0.75) : 1.15, opacity: edge.reachabilityOnly ? 0.72 : edge.active ? 0.55 : 0.36 }}
         />)}
+        {edges.map((edge) => edge.activeForward ? <path
+          key={`${edge.id}-forward-active`}
+          className="graph-edge graph-edge-active graph-edge-forward"
+          d={edge.path}
+          markerEnd="url(#edge-arrow-active)"
+          style={{ strokeWidth: edge.width }}
+        /> : null)}
+        {edges.map((edge) => edge.activeReverse ? <path
+          key={`${edge.id}-reverse-active`}
+          className="graph-edge graph-edge-active graph-edge-reverse"
+          d={edge.path}
+          markerStart="url(#edge-arrow-active)"
+          style={{ strokeWidth: edge.width }}
+        /> : null)}
         {edges.map((edge) => edge.label ? <text
           key={`${edge.id}-label`}
           className="graph-edge-label"
