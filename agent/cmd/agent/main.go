@@ -55,7 +55,7 @@ func run() error {
 	if cfg.MockMode {
 		source = capture.NewMock(registration, cfg.FlowInterval)
 	} else {
-		source, err = capture.NewEBPF(registration, capture.EBPFOptions{
+		ebpfSource, err := capture.NewEBPF(registration, capture.EBPFOptions{
 			ObjectPath:       cfg.BPFObject,
 			CaptureMode:      cfg.CaptureMode,
 			CaptureInterface: cfg.CaptureInterface,
@@ -63,7 +63,17 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("start real eBPF collector: %w", err)
 		}
-		log.Printf("eBPF collector loaded object=%s mode=%s interface=%s", cfg.BPFObject, cfg.CaptureMode, cfg.CaptureInterface)
+		source = ebpfSource
+		log.Printf("eBPF collector loaded object=%s mode=%s interface=%s", cfg.BPFObject, ebpfSource.Mode(), cfg.CaptureInterface)
+		if ebpfSource.Mode() != "tc" {
+			icmpSource, err := capture.NewICMP(registration, cfg.CaptureInterface)
+			if err != nil {
+				log.Printf("icmp reachability collector disabled: %v", err)
+			} else {
+				source = capture.NewMulti(ebpfSource, icmpSource)
+				log.Printf("icmp reachability collector loaded interface=%s", cfg.CaptureInterface)
+			}
+		}
 	}
 	defer source.Close()
 	events, collectorErrors := source.Run(ctx)

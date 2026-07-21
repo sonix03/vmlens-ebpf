@@ -135,6 +135,7 @@ func NewEBPF(registration telemetry.Registration, options EBPFOptions) (*EBPFCol
 		}
 		c.links = append(c.links, attached)
 	}
+	c.captureMode = "kprobe"
 	eventsMap := collection.Maps["events"]
 	if eventsMap == nil {
 		return fail(fmt.Errorf("events ring buffer missing"))
@@ -144,6 +145,10 @@ func NewEBPF(registration telemetry.Registration, options EBPFOptions) (*EBPFCol
 		return fail(err)
 	}
 	return c, nil
+}
+
+func (c *EBPFCollector) Mode() string {
+	return c.captureMode
 }
 
 func (c *EBPFCollector) attachTCX() error {
@@ -221,7 +226,10 @@ func (c *EBPFCollector) convert(raw rawFlowEvent) telemetry.FlowEvent {
 		}
 	}
 	protocol := "tcp"
-	if raw.Protocol == 17 {
+	switch raw.Protocol {
+	case 1, 58:
+		protocol = "icmp"
+	case 17:
 		protocol = "udp"
 	}
 	direction := "egress"
@@ -261,7 +269,7 @@ func requestCount(protocol, direction string, raw rawFlowEvent) int64 {
 	if raw.Connections > 0 {
 		return int64(raw.Connections)
 	}
-	if protocol != "udp" || raw.Bytes == 0 {
+	if protocol != "udp" && protocol != "icmp" || raw.Bytes == 0 {
 		return 0
 	}
 	switch direction {

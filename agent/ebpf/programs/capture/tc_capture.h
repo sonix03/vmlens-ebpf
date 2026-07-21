@@ -11,9 +11,10 @@ static __always_inline int load_bytes(void *data, void *data_end, __u64 offset, 
     return 1;
 }
 
-static __always_inline int supported_l4_protocol(__u8 protocol)
+static __always_inline int supported_ip_protocol(__u8 protocol)
 {
-    return protocol == IPPROTO_TCP_VALUE || protocol == IPPROTO_UDP_VALUE;
+    return protocol == IPPROTO_TCP_VALUE || protocol == IPPROTO_UDP_VALUE ||
+           protocol == IPPROTO_ICMP_VALUE || protocol == IPPROTO_ICMPV6_VALUE;
 }
 
 static __always_inline void copy_v4(__u8 destination[16], __u32 value)
@@ -65,7 +66,7 @@ static __always_inline int emit_tc_packet(struct __sk_buff *skb, __u8 direction)
         __u8 ihl = (version_ihl & 0x0f) * 4;
         if (ihl < IPV4_MIN_HEADER_LEN) return TC_ACT_OK;
         if (!load_bytes(data, data_end, network_offset + IPV4_PROTOCOL_OFFSET, &protocol, sizeof(protocol))) return TC_ACT_OK;
-        if (!supported_l4_protocol(protocol)) return TC_ACT_OK;
+        if (!supported_ip_protocol(protocol)) return TC_ACT_OK;
         if (!load_bytes(data, data_end, network_offset + IPV4_SRC_OFFSET, &saddr, sizeof(saddr))) return TC_ACT_OK;
         if (!load_bytes(data, data_end, network_offset + IPV4_DST_OFFSET, &daddr, sizeof(daddr))) return TC_ACT_OK;
         copy_v4(src_addr, saddr);
@@ -74,7 +75,7 @@ static __always_inline int emit_tc_packet(struct __sk_buff *skb, __u8 direction)
         family = AF_INET_VALUE;
     } else if (eth_proto == ETH_P_IPV6_VALUE) {
         if (!load_bytes(data, data_end, network_offset + IPV6_NEXT_HEADER_OFFSET, &protocol, sizeof(protocol))) return TC_ACT_OK;
-        if (!supported_l4_protocol(protocol)) return TC_ACT_OK;
+        if (!supported_ip_protocol(protocol)) return TC_ACT_OK;
         if (!load_bytes(data, data_end, network_offset + IPV6_SRC_OFFSET, src_addr, 16)) return TC_ACT_OK;
         if (!load_bytes(data, data_end, network_offset + IPV6_DST_OFFSET, dst_addr, 16)) return TC_ACT_OK;
         network_offset += IPV6_HEADER_LEN;
@@ -83,12 +84,14 @@ static __always_inline int emit_tc_packet(struct __sk_buff *skb, __u8 direction)
         return TC_ACT_OK;
     }
 
-    if (!load_bytes(data, data_end, network_offset, &src_port, sizeof(src_port))) return TC_ACT_OK;
-    if (!load_bytes(data, data_end, network_offset + 2, &dst_port, sizeof(dst_port))) return TC_ACT_OK;
-    src_port = bpf_ntohs(src_port);
-    dst_port = bpf_ntohs(dst_port);
-    if (protocol == IPPROTO_TCP_VALUE) {
-        if (!load_bytes(data, data_end, network_offset + TCP_FLAGS_OFFSET, &tcp_flags, sizeof(tcp_flags))) return TC_ACT_OK;
+    if (protocol == IPPROTO_TCP_VALUE || protocol == IPPROTO_UDP_VALUE) {
+        if (!load_bytes(data, data_end, network_offset, &src_port, sizeof(src_port))) return TC_ACT_OK;
+        if (!load_bytes(data, data_end, network_offset + 2, &dst_port, sizeof(dst_port))) return TC_ACT_OK;
+        src_port = bpf_ntohs(src_port);
+        dst_port = bpf_ntohs(dst_port);
+        if (protocol == IPPROTO_TCP_VALUE) {
+            if (!load_bytes(data, data_end, network_offset + TCP_FLAGS_OFFSET, &tcp_flags, sizeof(tcp_flags))) return TC_ACT_OK;
+        }
     }
 
     struct flow_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
