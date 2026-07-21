@@ -6,7 +6,7 @@ import type { InternalActivity } from '../types/internalActivity'
 import type { Summary, TopTalker } from '../types/stats'
 import type { VM } from '../types/vm'
 
-export const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || 'http://localhost:8080'
+export const API_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '')
 
 async function get<T>(path: string): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, { cache: 'no-store' })
@@ -36,5 +36,5 @@ export const api = {
   agents: () => get<Agent[]>('/api/agents'),
   vms: () => get<VM[]>('/api/vms'),
   flows: () => get<Flow[]>('/api/flows'),
-  internalActivity: () => get<InternalActivity[]>('/api/internal/activity?limit=100'),
+  internalActivity: () => get<InternalActivity[]>('/api/internal/activity?limit=40'),
 }
