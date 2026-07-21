@@ -16,6 +16,11 @@
 VMLens observes VM-to-VM and VM-to-external network relationships, then shows
 them as live topology lines in a local dashboard.
 
+DeepFlow can also be used as an external L4/L7 telemetry source. In that mode,
+VMLens reads DeepFlow raw rows, filters them by VM inventory, deduplicates tap
+side duplicates, and renders VM-centric topology edges. See
+[docs/deepflow-integration.md](./docs/deepflow-integration.md).
+
 It is designed for development and lab environments where the dashboard runs on
 your laptop, while lightweight agents run inside cloud VMs.
 
