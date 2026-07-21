@@ -19,6 +19,9 @@ var udpServices = map[int]string{
 }
 
 func classifyService(protocol, direction string, srcPort, dstPort int) (string, int) {
+	if protocol == "icmp" {
+		return "icmp", 0
+	}
 	services := tcpServices
 	if protocol == "udp" {
 		services = udpServices

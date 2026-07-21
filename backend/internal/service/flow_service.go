@@ -256,8 +256,12 @@ func validateFlow(event *model.FlowEvent) error {
 	if event.AgentID == "" {
 		return fmt.Errorf("agent_id is required")
 	}
-	if event.Protocol != "tcp" && event.Protocol != "udp" {
-		return fmt.Errorf("protocol must be tcp or udp")
+	if event.Protocol != "tcp" && event.Protocol != "udp" && event.Protocol != "icmp" {
+		return fmt.Errorf("protocol must be tcp, udp, or icmp")
+	}
+	if event.Protocol == "icmp" {
+		event.SrcPort = 0
+		event.DstPort = 0
 	}
 	if event.Direction == "" {
 		event.Direction = "egress"
@@ -304,7 +308,7 @@ func inferRequestCount(event model.FlowEvent) int64 {
 	if event.ConnectionCount > 0 {
 		return event.ConnectionCount
 	}
-	if event.Protocol == "udp" {
+	if event.Protocol == "udp" || event.Protocol == "icmp" {
 		switch event.Direction {
 		case "egress":
 			if event.BytesSent > 0 {

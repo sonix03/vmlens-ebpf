@@ -42,3 +42,20 @@ func TestSetEdgeActivity(t *testing.T) {
 		t.Fatal("expected edge to become idle after the activity window")
 	}
 }
+
+func TestGraphEdgeIDAggregatesEphemeralPorts(t *testing.T) {
+	first := graphEdgeID("vm-a", "vm-b", "tcp", ScopeInternalSameTenant)
+	second := graphEdgeID("vm-a", "vm-b", "tcp", ScopeInternalSameTenant)
+	if first != second {
+		t.Fatalf("expected repeated traffic between the same VMs to share one edge id, got %q and %q", first, second)
+	}
+}
+
+func TestPreferredGraphPortKeepsServicePort(t *testing.T) {
+	if got := preferredGraphPort(48112, 8081); got != 8081 {
+		t.Fatalf("expected service port to replace ephemeral port, got %d", got)
+	}
+	if got := preferredGraphPort(8081, 48112); got != 8081 {
+		t.Fatalf("expected existing service port to stay selected, got %d", got)
+	}
+}

@@ -14,6 +14,9 @@ func TestInferRequestCount(t *testing.T) {
 	if got := inferRequestCount(model.FlowEvent{Protocol: "udp", Direction: "egress", BytesSent: 64}); got != 1 {
 		t.Fatalf("udp egress request count = %d, want 1", got)
 	}
+	if got := inferRequestCount(model.FlowEvent{Protocol: "icmp", Direction: "egress", BytesSent: 84}); got != 1 {
+		t.Fatalf("icmp egress request count = %d, want 1", got)
+	}
 	if got := inferRequestCount(model.FlowEvent{Protocol: "tcp", Direction: "egress", BytesSent: 64}); got != 0 {
 		t.Fatalf("tcp io request count = %d, want 0", got)
 	}

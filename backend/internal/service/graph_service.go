@@ -198,11 +198,13 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 			}
 		}
 
-		edgeID := fmt.Sprintf("%s->%s:%d/%s", sourceID, targetID, row.DstPort, row.Protocol)
+		edgeID := graphEdgeID(sourceID, targetID, row.Protocol, row.Scope)
 		edge, ok := edges[edgeID]
 		if !ok {
 			edge = &model.GraphEdge{ID: edgeID, Source: sourceID, Target: targetID, Protocol: row.Protocol, DstPort: row.DstPort, Scope: row.Scope, FirstSeen: row.FirstSeen, LastSeen: row.LastSeen}
 			edges[edgeID] = edge
+		} else {
+			edge.DstPort = preferredGraphPort(edge.DstPort, row.DstPort)
 		}
 		edge.BytesSent += row.BytesSent
 		edge.BytesReceived += row.BytesReceived
@@ -237,6 +239,24 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 	sort.Slice(result.Nodes, func(i, j int) bool { return result.Nodes[i].ID < result.Nodes[j].ID })
 	sort.Slice(result.Edges, func(i, j int) bool { return result.Edges[i].ID < result.Edges[j].ID })
 	return result, nil
+}
+
+func graphEdgeID(sourceID, targetID, protocol, scope string) string {
+	return fmt.Sprintf("%s->%s:%s/%s", sourceID, targetID, protocol, scope)
+}
+
+func preferredGraphPort(current, next int) int {
+	if current == 0 {
+		return next
+	}
+	if isEphemeralPort(current) && !isEphemeralPort(next) {
+		return next
+	}
+	return current
+}
+
+func isEphemeralPort(port int) bool {
+	return port >= 32768
 }
 
 func setEdgeActivity(edge *model.GraphEdge, now, observedAt time.Time, activeWindow time.Duration) {
