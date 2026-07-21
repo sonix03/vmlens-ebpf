@@ -14,7 +14,7 @@ interface Props {
 }
 
 const statusColors: Record<string, string> = {
-  online: '#55a979', stale: '#c5964b', offline: '#6b7280', unknown: '#8b949e',
+  online: '#55a979', stale: '#c5964b', offline: '#6b7280', external: '#608fbd', unknown: '#8b949e',
 }
 const nodeWidth = 270
 const nodeHeight = 64
@@ -31,6 +31,10 @@ type VisualRelationship = {
   target: string
   weight: number
   activeUntil: number
+  totalBytes: number
+  requestCount: number
+  errorCount: number
+  avgRTTMs: number
 }
 
 function clampZoom(zoom: number) {
@@ -103,6 +107,15 @@ function VMIcon() {
   </span>
 }
 
+function ExternalIcon() {
+  return <span className="vm-node-icon external-icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="none">
+      <circle cx="12" cy="12" r="8" />
+      <path d="M4 12h16M12 4c2 2.2 3 4.8 3 8s-1 5.8-3 8M12 4c-2 2.2-3 4.8-3 8s1 5.8 3 8" />
+    </svg>
+  </span>
+}
+
 function NodeStatusIcon({ status }: { status: string }) {
   if (status === 'online') {
     return <span className="vm-node-status" aria-label="online">
@@ -125,6 +138,13 @@ function positionForSlot(slot: number, total: number) {
   const column = slot % columns
   const row = Math.floor(slot / columns)
   return { x: canvasPadding + column * 470, y: canvasPadding + row * 240 }
+}
+
+function formatCompactBytes(value: number) {
+  if (value >= 1024 * 1024 * 1024) return `${(value / 1024 / 1024 / 1024).toFixed(1)}GB`
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)}MB`
+  if (value >= 1024) return `${(value / 1024).toFixed(1)}KB`
+  return `${value}B`
 }
 
 export function GraphView({ graph, onNodeSelect }: Props) {
@@ -206,21 +226,18 @@ export function GraphView({ graph, onNodeSelect }: Props) {
     setPanning(false)
   }
 
-  // The main topology is VM-only. Unknown/private and public endpoints remain
-  // available through the API without becoming graph nodes.
-  const vmNodes = useMemo(() => graph.nodes
-    .filter((node) => node.type === 'vm')
+  const graphNodes = useMemo(() => [...graph.nodes]
     .sort((a, b) => nodeSortKey(a).localeCompare(nodeSortKey(b))), [graph.nodes])
-  if (vmNodes.length > 0) {
-    lastVMNodes.current = vmNodes
+  if (graphNodes.length > 0) {
+    lastVMNodes.current = graphNodes
   }
-  const visibleVMNodes = vmNodes.length > 0 ? vmNodes : lastVMNodes.current
-  const vmIDs = useMemo(() => new Set(visibleVMNodes.map((node) => node.id)), [visibleVMNodes])
+  const visibleGraphNodes = graphNodes.length > 0 ? graphNodes : lastVMNodes.current
+  const nodeIDs = useMemo(() => new Set(visibleGraphNodes.map((node) => node.id)), [visibleGraphNodes])
 
-  const nodes = useMemo(() => visibleVMNodes.map((node, index) => {
+  const nodes = useMemo(() => visibleGraphNodes.map((node, index) => {
     const status = node.status || 'unknown'
     const color = statusColors[status] || statusColors.unknown
-    const position = positionForSlot(index, visibleVMNodes.length)
+    const position = positionForSlot(index, visibleGraphNodes.length)
     return {
       node,
       color,
@@ -228,7 +245,7 @@ export function GraphView({ graph, onNodeSelect }: Props) {
       position,
       center: { x: position.x + nodeWidth / 2, y: position.y + nodeHeight / 2 },
     }
-  }), [visibleVMNodes])
+  }), [visibleGraphNodes])
   const nodeByID = useMemo(() => new Map(nodes.map((item) => [item.node.id, item])), [nodes])
 
   const edges = useMemo(() => {
@@ -236,18 +253,26 @@ export function GraphView({ graph, onNodeSelect }: Props) {
     // edge. Individual aggregated flows remain available in the backend.
     const relationships = new Map<string, VisualRelationship>()
     graph.edges.forEach((edge) => {
-      if (!vmIDs.has(edge.source) || !vmIDs.has(edge.target)) return
       if (edge.source === edge.target) return
-      const { source, target } = visualDirection(edge, graph.edges, vmIDs)
+      if (!nodeIDs.has(edge.source) || !nodeIDs.has(edge.target)) return
+      const { source, target } = visualDirection(edge, graph.edges, nodeIDs)
       const key = `${source}->${target}`
       const current = relationships.get(key) || {
         source,
         target,
         weight: 1,
         activeUntil: 0,
+        totalBytes: 0,
+        requestCount: 0,
+        errorCount: 0,
+        avgRTTMs: 0,
       }
       current.weight = Math.max(current.weight, edge.weight)
       current.activeUntil = Math.max(current.activeUntil, activeUntil(edge))
+      current.totalBytes += edge.total_bytes ?? edge.bytes_sent + edge.bytes_received
+      current.requestCount += edge.request_count ?? 0
+      current.errorCount += edge.error_count ?? 0
+      current.avgRTTMs = Math.max(current.avgRTTMs, edge.avg_rtt_ms ?? 0)
       relationships.set(key, current)
     })
 
@@ -259,6 +284,12 @@ export function GraphView({ graph, onNodeSelect }: Props) {
       const color = active ? '#6fa88b' : '#4a515a'
       const start = edgePoint(source.center, target.center)
       const end = edgePoint(target.center, source.center)
+      const label = [
+        formatCompactBytes(relationship.totalBytes),
+        relationship.requestCount ? `${relationship.requestCount} req` : '',
+        relationship.avgRTTMs ? `${relationship.avgRTTMs.toFixed(1)}ms` : '',
+        relationship.errorCount ? `${relationship.errorCount} err` : '',
+      ].filter(Boolean).join(' · ')
       return {
         id,
         active,
@@ -266,9 +297,12 @@ export function GraphView({ graph, onNodeSelect }: Props) {
         width: active ? Math.min(4, 1.25 + relationship.weight * 0.4) : 1,
         opacity: active ? 0.95 : 0.36,
         path: curvedPath(start, end),
+        label,
+        labelX: (start.x + end.x) / 2,
+        labelY: (start.y + end.y) / 2 - 10,
       }
     })
-  }, [clock, graph.edges, nodeByID, vmIDs])
+  }, [clock, graph.edges, nodeByID, nodeIDs])
 
   const canvas = useMemo(() => {
     const maxX = Math.max(...nodes.map((item) => item.position.x + nodeWidth + canvasPadding), minCanvasWidth)
@@ -285,7 +319,7 @@ export function GraphView({ graph, onNodeSelect }: Props) {
     onPointerUp={finishPan}
     onPointerCancel={finishPan}
   >
-    {visibleVMNodes.length === 0 && <div className="graph-empty"><strong>Waiting for VM</strong><span></span></div>}
+    {visibleGraphNodes.length === 0 && <div className="graph-empty"><strong>Waiting for VM</strong><span></span></div>}
     <div
       className="graph-map"
       style={{
@@ -311,6 +345,13 @@ export function GraphView({ graph, onNodeSelect }: Props) {
           markerEnd={`url(#${edge.active ? 'edge-arrow-active' : 'edge-arrow-idle'})`}
           style={{ stroke: edge.color, strokeWidth: edge.width, opacity: edge.opacity }}
         />)}
+        {edges.map((edge) => edge.label ? <text
+          key={`${edge.id}-label`}
+          className="graph-edge-label"
+          x={edge.labelX}
+          y={edge.labelY}
+          textAnchor="middle"
+        >{edge.label}</text> : null)}
       </svg>
       {nodes.map(({ node, color, status, position }) => <button
         key={node.id}
@@ -322,7 +363,7 @@ export function GraphView({ graph, onNodeSelect }: Props) {
         onClick={() => onNodeSelect(node)}
       >
         <div className="vm-node-content">
-          <VMIcon />
+          {node.type === 'external' ? <ExternalIcon /> : <VMIcon />}
           <span className="vm-node-text">
             <strong>{node.label}</strong>
             <small>{node.ip || 'no IP'} · {status}</small>

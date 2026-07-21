@@ -18,7 +18,7 @@ export interface GraphEdge {
   id: string
   source: string
   target: string
-  protocol: 'tcp' | 'udp'
+  protocol: 'tcp' | 'udp' | string
   dst_port: number
   scope: FlowScope
   bytes_sent: number
@@ -32,6 +32,20 @@ export interface GraphEdge {
   active: boolean
   active_until: string
   weight: number
+  source_ip?: string
+  dest_ip?: string
+  source_role?: string
+  dest_role?: string
+  direction?: string
+  server_port?: number
+  error_count?: number
+  total_bytes?: number
+  avg_rtt_ms?: number
+  p95_rtt_ms?: number
+  avg_response_duration_ms?: number
+  last_response_code?: number
+  agent_ids?: string[]
+  observation_points?: string[]
 }
 
 export interface GraphData {

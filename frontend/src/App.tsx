@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './api/client'
 import { connectRealtime } from './api/realtime'
+import { DeepFlowFlowTable } from './components/DeepFlowFlowTable'
 import { GraphView } from './components/GraphView'
 import { InternalActivityTable } from './components/InternalActivityTable'
 import { NodeDetailsPanel } from './components/NodeDetailsPanel'
 import { StatCards } from './components/StatCards'
 import type { Flow } from './types/flow'
+import type { DeepFlowHealth, DeepFlowRawLogs, DeepFlowTopology } from './types/deepflow'
 import type { GraphData, GraphEdge, GraphFilters, GraphNode } from './types/graph'
 import type { InternalActivity } from './types/internalActivity'
 import type { Summary } from './types/stats'
@@ -155,6 +157,70 @@ function mergeGraphData(current: GraphData, next: GraphData): GraphData {
   }
 }
 
+function deepFlowScope(direction: string) {
+  if (direction === 'internal_internal') return 'internal_same_tenant'
+  if (direction === 'internal_external' || direction === 'external_internal') return 'external_public'
+  return 'unknown'
+}
+
+function deepFlowNodeType(type: string): GraphNode['type'] {
+  if (type === 'vm' || type === 'external' || type === 'unknown_internal' || type === 'unknown') return type
+  return 'unknown'
+}
+
+function deepFlowToGraphData(topology: DeepFlowTopology): GraphData {
+  const nodes: GraphNode[] = topology.nodes.map((node) => ({
+    id: node.id,
+    type: deepFlowNodeType(node.type),
+    label: node.label,
+    ip: node.ip,
+    status: node.status || node.type,
+    tenant_id: node.tenant_id,
+    role: node.role,
+    traffic_in: 0,
+    traffic_out: 0,
+  }))
+  const edges: GraphEdge[] = topology.edges.map((edge) => {
+    const lastSeen = edge.last_seen || topology.generated_at
+    const observedAt = lastSeen
+    const totalBytes = edge.total_bytes ?? 0
+    return {
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      protocol: edge.protocol || 'tcp',
+      dst_port: edge.server_port,
+      scope: deepFlowScope(edge.direction),
+      bytes_sent: totalBytes,
+      bytes_received: 0,
+      packets: 0,
+      connection_count: 0,
+      request_count: edge.request_count,
+      first_seen: lastSeen,
+      last_seen: lastSeen,
+      last_observed_at: observedAt,
+      active: Date.now() - Date.parse(lastSeen) <= activeWindowMs,
+      active_until: new Date(Date.parse(lastSeen) + activeWindowMs).toISOString(),
+      weight: edgeWeight(totalBytes),
+      source_ip: edge.source_ip,
+      dest_ip: edge.dest_ip,
+      source_role: edge.source_role,
+      dest_role: edge.dest_role,
+      direction: edge.direction,
+      server_port: edge.server_port,
+      error_count: edge.error_count,
+      total_bytes: totalBytes,
+      avg_rtt_ms: edge.avg_rtt_ms,
+      p95_rtt_ms: edge.p95_rtt_ms,
+      avg_response_duration_ms: edge.avg_response_duration_ms,
+      last_response_code: edge.last_response_code,
+      agent_ids: edge.agent_ids,
+      observation_points: edge.observation_points,
+    }
+  })
+  return { nodes, edges }
+}
+
 function applyLiveFlow(graph: GraphData, flow: Flow, observedAt: string): GraphData {
   if (!flow.src_vm_id) return graph
   const sourceExists = graph.nodes.some((node) => node.id === flow.src_vm_id && node.type === 'vm')
@@ -211,6 +277,8 @@ export function App() {
   const [graph, setGraph] = useState<GraphData>({ nodes: [], edges: [] })
   const [summary, setSummary] = useState<Summary>()
   const [internalActivity, setInternalActivity] = useState<InternalActivity[]>([])
+  const [deepFlowRaw, setDeepFlowRaw] = useState<DeepFlowRawLogs>()
+  const [deepFlowHealth, setDeepFlowHealth] = useState<DeepFlowHealth>()
   const [selectedNode, setSelectedNode] = useState<GraphNode>()
   const [connected, setConnected] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -219,13 +287,25 @@ export function App() {
   const vmInventory = useRef<GraphNode[]>([])
 
   const load = useCallback(async () => {
-    const [nextGraph, nextSummary, nextActivity, nextVMs] = await Promise.allSettled([
-      api.graph(graphWindow), api.summary(), api.internalActivity(), api.vms(),
+    const [nextGraph, nextDeepFlowGraph, nextDeepFlowRaw, nextDeepFlowHealth, nextSummary, nextActivity, nextVMs] = await Promise.allSettled([
+      api.graph(graphWindow), api.deepFlowGraph(graphWindow), api.deepFlowRaw(graphWindow), api.deepFlowHealth(), api.summary(), api.internalActivity(), api.vms(),
     ])
     if (nextVMs.status === 'fulfilled') {
       vmInventory.current = nextVMs.value.map(vmToGraphNode)
     }
-    if (nextGraph.status === 'fulfilled') {
+    if (nextDeepFlowRaw.status === 'fulfilled') {
+      setDeepFlowRaw(nextDeepFlowRaw.value)
+    }
+    if (nextDeepFlowHealth.status === 'fulfilled') {
+      setDeepFlowHealth(nextDeepFlowHealth.value)
+    }
+    const deepFlowUsable = nextDeepFlowGraph.status === 'fulfilled'
+      && (nextDeepFlowGraph.value.edges.length > 0
+        || (nextDeepFlowHealth.status === 'fulfilled' && nextDeepFlowHealth.value.clickhouse_reachable))
+    if (deepFlowUsable) {
+      setGraph((current) => mergeVMInventory(mergeGraphData(current, deepFlowToGraphData(nextDeepFlowGraph.value)), vmInventory.current))
+      setError('')
+    } else if (nextGraph.status === 'fulfilled') {
       setGraph((current) => mergeVMInventory(mergeGraphData(current, nextGraph.value), vmInventory.current))
       setError('')
     } else {
@@ -304,6 +384,7 @@ export function App() {
       {selectedNode && <NodeDetailsPanel node={selectedNode} onClose={() => setSelectedNode(undefined)} />}
     </section>
     <InternalActivityTable activity={internalActivity} />
+    <DeepFlowFlowTable raw={deepFlowRaw} health={deepFlowHealth} />
     <footer><span></span><span>{vmCount} VMs · {relationshipCount} relationships</span></footer>
   </main>
 }

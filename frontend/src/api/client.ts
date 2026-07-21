@@ -1,4 +1,5 @@
 import type { Agent } from '../types/agent'
+import type { DeepFlowHealth, DeepFlowRawLogs, DeepFlowTopology } from '../types/deepflow'
 import type { Flow } from '../types/flow'
 import type { GraphData, GraphFilters } from '../types/graph'
 import type { InternalActivity } from '../types/internalActivity'
@@ -27,6 +28,9 @@ function graphQuery(filters: GraphFilters): string {
 
 export const api = {
   graph: (filters: GraphFilters) => get<GraphData>(`/api/graph${graphQuery(filters)}`),
+  deepFlowGraph: (filters: GraphFilters) => get<DeepFlowTopology>(`/api/deepflow/graph${graphQuery(filters)}`),
+  deepFlowRaw: (filters: GraphFilters) => get<DeepFlowRawLogs>(`/api/deepflow/raw/flows${graphQuery({ ...filters, min_bytes: '', status: '' })}`),
+  deepFlowHealth: () => get<DeepFlowHealth>('/api/deepflow/health'),
   summary: () => get<Summary>('/api/stats/summary'),
   topTalkers: () => get<TopTalker[]>('/api/stats/top-talkers?limit=10'),
   agents: () => get<Agent[]>('/api/agents'),
