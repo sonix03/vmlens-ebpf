@@ -16,12 +16,13 @@ import (
 )
 
 type Handlers struct {
-	Pool   *pgxpool.Pool
-	Agents *service.AgentService
-	VMs    *service.VMService
-	Flows  *service.FlowService
-	Graph  *service.GraphService
-	Stats  *service.StatsService
+	Pool     *pgxpool.Pool
+	Agents   *service.AgentService
+	VMs      *service.VMService
+	Flows    *service.FlowService
+	Graph    *service.GraphService
+	Stats    *service.StatsService
+	DeepFlow *service.DeepFlowService
 }
 
 func (h *Handlers) Health(w http.ResponseWriter, r *http.Request) {
@@ -127,6 +128,58 @@ func (h *Handlers) GetGraph(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (h *Handlers) GetDeepFlowGraph(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if h.DeepFlow == nil {
+		writeError(w, http.StatusServiceUnavailable, "DeepFlow service is not configured")
+		return
+	}
+	filter, err := deepFlowRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	result, err := h.DeepFlow.Topology(r.Context(), filter)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handlers) GetDeepFlowRawFlows(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if h.DeepFlow == nil {
+		writeError(w, http.StatusServiceUnavailable, "DeepFlow service is not configured")
+		return
+	}
+	filter, err := deepFlowRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	result, err := h.DeepFlow.RawLogs(r.Context(), filter)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handlers) GetDeepFlowHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if h.DeepFlow == nil {
+		writeError(w, http.StatusServiceUnavailable, "DeepFlow service is not configured")
+		return
+	}
+	filter, err := deepFlowRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, h.DeepFlow.Health(r.Context(), filter))
+}
+
 func (h *Handlers) Summary(w http.ResponseWriter, r *http.Request) {
 	result, err := h.Stats.Summary(r.Context())
 	if err != nil {
@@ -174,6 +227,48 @@ func graphFilter(r *http.Request) (model.GraphFilter, error) {
 		filter.TimeRange = duration
 	}
 	return filter, nil
+}
+
+func deepFlowRequest(r *http.Request) (service.DeepFlowRequest, error) {
+	query := r.URL.Query()
+	filter := service.DeepFlowRequest{
+		TenantID:  query.Get("tenant_id"),
+		ProjectID: query.Get("project_id"),
+		VMID:      query.Get("vm_id"),
+	}
+	if raw := query.Get("limit"); raw != "" {
+		limit, err := strconv.Atoi(raw)
+		if err != nil || limit < 1 {
+			return filter, fmt.Errorf("invalid limit")
+		}
+		filter.Limit = limit
+	}
+	if raw := query.Get("time_range"); raw != "" {
+		duration, err := parseDuration(raw)
+		if err != nil {
+			return filter, fmt.Errorf("invalid time_range: %w", err)
+		}
+		filter.Window = duration
+	}
+	if raw := query.Get("mask_external_ips"); raw != "" {
+		value, err := parseBool(raw)
+		if err != nil {
+			return filter, fmt.Errorf("invalid mask_external_ips")
+		}
+		filter.MaskExternalIPs = &value
+	}
+	return filter, nil
+}
+
+func parseBool(raw string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "y", "on":
+		return true, nil
+	case "0", "false", "no", "n", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid bool")
+	}
 }
 
 func parseDuration(raw string) (time.Duration, error) {

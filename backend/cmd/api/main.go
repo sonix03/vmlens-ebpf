@@ -46,7 +46,8 @@ func run() error {
 	flows := service.NewFlowService(pool, classifier, hub)
 	graph := service.NewGraphService(pool, vms, cfg.FlowActiveWindow)
 	stats := service.NewStatsService(pool)
-	handlers := &apihttp.Handlers{Pool: pool, Agents: agents, VMs: vms, Flows: flows, Graph: graph, Stats: stats}
+	deepFlow := service.NewDeepFlowService(cfg.DeepFlow, vms)
+	handlers := &apihttp.Handlers{Pool: pool, Agents: agents, VMs: vms, Flows: flows, Graph: graph, Stats: stats, DeepFlow: deepFlow}
 
 	server := &http.Server{Addr: cfg.ListenAddr, Handler: apihttp.Routes(handlers, hub, cfg.AllowedOrigins), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 	serverErrors := make(chan error, 1)
