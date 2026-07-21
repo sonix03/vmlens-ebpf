@@ -20,6 +20,9 @@ const (
 	directionInternalInternal = "internal_internal"
 	directionInternalExternal = "internal_external"
 	directionExternalInternal = "external_internal"
+
+	edgeKindTraffic      = "traffic"
+	edgeKindReachability = "reachability"
 )
 
 type TopologyOptions struct {
@@ -71,7 +74,8 @@ func NormalizeTopology(
 		direction := topologyDirection(row.InternetDirection, row.L3EPCID0, row.L3EPCID1)
 		sourceNode, sourceRole := topologyNode(nodes, row.SourceIP, sourceVM, sourceMapped, sourceRoleFor(direction, sourceMapped), options.MaskExternalIPs)
 		destNode, destRole := topologyNode(nodes, row.DestIP, destVM, destMapped, destRoleFor(direction, destMapped), options.MaskExternalIPs)
-		edge := ensureEdge(edges, sourceNode, destNode, sourceVMID(sourceVM, sourceMapped), sourceVMID(destVM, destMapped), row.SourceIP, row.DestIP, sourceRole, destRole, direction, row.Protocol, row.ServerPort, options.MaskExternalIPs)
+		kind := edgeKindForL4(row)
+		edge := ensureEdge(edges, sourceNode, destNode, sourceVMID(sourceVM, sourceMapped), sourceVMID(destVM, destMapped), row.SourceIP, row.DestIP, sourceRole, destRole, direction, kind, row.Protocol, row.ServerPort, options.MaskExternalIPs)
 		edge.totalBytes += row.TotalBytes
 		edge.retransTotal += row.RetransTotal
 		edge.l4Rows++
@@ -102,7 +106,7 @@ func NormalizeTopology(
 			protocol = "tcp"
 		}
 		serverPort := portHints.serverPort(row.SourceIP, row.DestIP, protocol)
-		edge := ensureEdge(edges, sourceNode, destNode, sourceVMID(sourceVM, sourceMapped), sourceVMID(destVM, destMapped), row.SourceIP, row.DestIP, sourceRole, destRole, direction, protocol, serverPort, options.MaskExternalIPs)
+		edge := ensureEdge(edges, sourceNode, destNode, sourceVMID(sourceVM, sourceMapped), sourceVMID(destVM, destMapped), row.SourceIP, row.DestIP, sourceRole, destRole, direction, edgeKindTraffic, protocol, serverPort, options.MaskExternalIPs)
 		edge.requestCount++
 		edge.totalBytes += row.RequestLength + row.ResponseLength
 		if row.ResponseCode >= 400 {
@@ -330,9 +334,19 @@ func topologyNode(nodes map[string]model.DeepFlowNode, ip string, vm model.VM, m
 	return id, role
 }
 
-func ensureEdge(edges map[string]*edgeAccumulator, sourceNode, destNode, sourceVMID, destVMID, sourceIP, destIP, sourceRole, destRole, direction, protocol string, serverPort int, maskExternal bool) *edgeAccumulator {
+func edgeKindForL4(row model.DeepFlowL4Flow) string {
+	if normalizeProtocol(row.Protocol) == "icmp" {
+		return edgeKindReachability
+	}
+	return edgeKindTraffic
+}
+
+func ensureEdge(edges map[string]*edgeAccumulator, sourceNode, destNode, sourceVMID, destVMID, sourceIP, destIP, sourceRole, destRole, direction, kind, protocol string, serverPort int, maskExternal bool) *edgeAccumulator {
 	if protocol == "" {
 		protocol = "unknown"
+	}
+	if kind == "" {
+		kind = edgeKindTraffic
 	}
 	sourceLabel := sourceIP
 	destLabel := destIP
@@ -342,7 +356,7 @@ func ensureEdge(edges map[string]*edgeAccumulator, sourceNode, destNode, sourceV
 	if maskExternal && destRole == roleExternalIP {
 		destLabel = maskedExternalLabel(destIP)
 	}
-	id := fmt.Sprintf("%s->%s:%d/%s/%s", sourceNode, destNode, serverPort, protocol, direction)
+	id := fmt.Sprintf("%s->%s:%d/%s/%s/%s", sourceNode, destNode, serverPort, protocol, direction, kind)
 	if edge, ok := edges[id]; ok {
 		return edge
 	}
@@ -350,7 +364,7 @@ func ensureEdge(edges map[string]*edgeAccumulator, sourceNode, destNode, sourceV
 		id: id, source: sourceNode, target: destNode,
 		sourceVMID: sourceVMID, destVMID: destVMID,
 		sourceIP: sourceLabel, destIP: destLabel, sourceRole: sourceRole, destRole: destRole,
-		direction: direction, protocol: protocol, serverPort: serverPort,
+		direction: direction, kind: kind, protocol: protocol, serverPort: serverPort,
 		agentIDs: set{}, observationPoints: set{},
 	}
 	edges[id] = edge
@@ -362,7 +376,7 @@ type edgeAccumulator struct {
 	sourceVMID, destVMID        string
 	sourceIP, destIP            string
 	sourceRole, destRole        string
-	direction, protocol         string
+	direction, kind, protocol   string
 	serverPort                  int
 	requestCount, errorCount    int64
 	totalBytes, retransTotal    int64
@@ -377,7 +391,8 @@ func (e *edgeAccumulator) model() model.DeepFlowEdge {
 	return model.DeepFlowEdge{
 		ID: e.id, Source: e.source, Target: e.target, SourceVMID: e.sourceVMID, DestVMID: e.destVMID,
 		SourceIP: e.sourceIP, DestIP: e.destIP, SourceRole: e.sourceRole, DestRole: e.destRole,
-		Direction: e.direction, Protocol: e.protocol, ServerPort: e.serverPort,
+		Direction: e.direction, Kind: e.kind, Reachable: e.kind == edgeKindReachability,
+		Protocol: e.protocol, ServerPort: e.serverPort,
 		RequestCount: e.requestCount, ErrorCount: e.errorCount, TotalBytes: e.totalBytes,
 		AvgRTTMs: avg(e.rtts), P95RTTMs: p95(e.rtts), AvgResponseDurationMs: avg(e.responseDurations),
 		LastResponseCode: e.lastResponseCode, LastSeen: e.lastSeen,

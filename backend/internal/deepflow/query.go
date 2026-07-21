@@ -29,7 +29,7 @@ SELECT
   concat(toString(if(l3_epc_id_0=-2,1,0)), ' -> ', toString(if(l3_epc_id_1=-2,1,0))) AS internet_direction,
   client_port,
   server_port,
-  multiIf(protocol=6, 'tcp', protocol=17, 'udp', toString(protocol)) AS protocol,
+  multiIf(protocol=1, 'icmp', protocol=6, 'tcp', protocol=17, 'udp', toString(protocol)) AS protocol,
   toString(status) AS status,
   byte_tx,
   byte_rx,
@@ -393,6 +393,8 @@ func safeLimit(value, max int) int {
 
 func normalizeProtocol(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "icmp":
+		return "icmp"
 	case "6", "tcp":
 		return "tcp"
 	case "17", "udp":

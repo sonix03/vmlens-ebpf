@@ -72,6 +72,8 @@ type DeepFlowEdge struct {
 	SourceRole            string    `json:"source_role"`
 	DestRole              string    `json:"dest_role"`
 	Direction             string    `json:"direction"`
+	Kind                  string    `json:"kind"`
+	Reachable             bool      `json:"reachable,omitempty"`
 	Protocol              string    `json:"protocol"`
 	ServerPort            int       `json:"server_port"`
 	RequestCount          int64     `json:"request_count"`

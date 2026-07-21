@@ -67,4 +67,41 @@ func TestNormalizeTopologyExternalTrafficCreatesExternalNode(t *testing.T) {
 	if edge.DestIP == "1.1.1.1" {
 		t.Fatal("external IP should be masked")
 	}
+	if edge.Kind != edgeKindTraffic {
+		t.Fatalf("kind = %s, want %s", edge.Kind, edgeKindTraffic)
+	}
+}
+
+func TestNormalizeTopologyICMPCreatesReachabilityEdge(t *testing.T) {
+	now := time.Date(2026, 7, 21, 9, 0, 0, 0, time.UTC)
+	vms := []model.VM{
+		{ID: "vm-a", Name: "testing-a-1", PrivateIP: "10.20.20.199", Status: "online"},
+		{ID: "vm-b", Name: "testing-a-extra", PrivateIP: "10.20.20.249", Status: "online"},
+	}
+	l4Rows := []model.DeepFlowL4Flow{{
+		Time: now, SourceIP: "10.20.20.199", DestIP: "10.20.20.249", ServerPort: 0,
+		Protocol: "icmp", Status: "Success", ByteTX: 84, ByteRX: 84, TotalBytes: 168,
+		RTTMs: 0.586, AgentID: "2", L3EPCID0: 1, L3EPCID1: 1, InternetDirection: "0 -> 0",
+	}}
+
+	topology := NormalizeTopology(vms, l4Rows, nil, nil, TopologyOptions{Window: time.Minute})
+	if len(topology.Edges) != 1 {
+		t.Fatalf("edges = %d, want 1", len(topology.Edges))
+	}
+	edge := topology.Edges[0]
+	if edge.Kind != edgeKindReachability {
+		t.Fatalf("kind = %s, want %s", edge.Kind, edgeKindReachability)
+	}
+	if !edge.Reachable {
+		t.Fatal("reachable = false, want true")
+	}
+	if edge.Protocol != "icmp" {
+		t.Fatalf("protocol = %s, want icmp", edge.Protocol)
+	}
+	if edge.RequestCount != 1 {
+		t.Fatalf("request_count = %d, want 1", edge.RequestCount)
+	}
+	if edge.AvgRTTMs != 0.586 {
+		t.Fatalf("avg_rtt_ms = %f, want 0.586", edge.AvgRTTMs)
+	}
 }
