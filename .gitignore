@@ -17,7 +17,7 @@ agent/ebpf/include/vmlinux.h
 agent/ebpf/programs/*.o
 legacy/v1-stack/internal/ebpf/vmlinux.h
 legacy/v1-stack/internal/ebpf/*.o
-SCRIPT.md
-INSTRUCTION.md
-SETUP.md
-SONI.txt
+/SCRIPT.md
+/INSTRUCTION.md
+/SETUP.md
+/SONI.txt
