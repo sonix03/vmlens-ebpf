@@ -98,13 +98,12 @@ func (c *Client) QueryAgentMappings(ctx context.Context) ([]model.DeepFlowAgentM
 SELECT
   toString(v.id) AS agent_id,
   v.name AS agent_name,
-  p.device_name AS vm_name,
-  p.name AS interface_name,
-  p.tap_port
+  ifNull(nullIf(p.device_name, ''), v.name) AS vm_name,
+  ifNull(p.name, '') AS interface_name,
+  ifNull(toString(p.tap_port), '') AS tap_port
 FROM flow_tag.vtap_map AS v
 LEFT JOIN flow_tag.vtap_port_map AS p
-  ON v.id = p.vtap_id
-WHERE p.name != 'lo'
+  ON v.id = p.vtap_id AND p.name != 'lo'
 ORDER BY v.id
 LIMIT 5000`
 
