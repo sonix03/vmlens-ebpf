@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api } from './api/client'
+import { api, GRAFANA_L4_URL, GRAFANA_L7_URL } from './api/client'
 import { connectRealtime } from './api/realtime'
 import { DeepFlowFlowTable, type DeepFlowTableMode } from './components/DeepFlowFlowTable'
 import { GraphView } from './components/GraphView'
@@ -14,10 +14,21 @@ import type { Summary } from './types/stats'
 import type { VM } from './types/vm'
 
 const graphWindow: GraphFilters = {
-  vm_id: '', scope: '', protocol: '', port: '', time_range: '5m', min_bytes: '', status: '',
+  vm_id: '', scope: '', protocol: '', port: '', time_range: '15m', min_bytes: '', status: '',
 }
 
-const activeWindowMs = 3000
+const deepFlowLogWindow: GraphFilters = {
+  vm_id: '', scope: '', protocol: '', port: '', time_range: '1h', min_bytes: '', status: '',
+}
+
+const internalActivityWindow = '5m'
+const internalActivityLimit = 200
+const deepFlowLogLimit = 500
+
+const graphWindowLabel = graphWindow.time_range
+const deepFlowWindowLabel = deepFlowLogWindow.time_range
+
+const activeWindowMs = 6000
 const canonicalRefreshDelayMs = 1000
 type ActivityView = 'internal' | DeepFlowTableMode
 
@@ -252,7 +263,7 @@ export function App() {
 
   const loadDeepFlow = useCallback(async () => {
     const [nextDeepFlowRaw, nextDeepFlowHealth] = await Promise.allSettled([
-      api.deepFlowRaw(graphWindow), api.deepFlowHealth(),
+      api.deepFlowRaw(deepFlowLogWindow, deepFlowLogLimit), api.deepFlowHealth(),
     ])
 
     if (nextDeepFlowRaw.status === 'fulfilled') {
@@ -265,7 +276,7 @@ export function App() {
 
   const load = useCallback(async () => {
     const [nextGraph, nextSummary, nextActivity, nextVMs] = await Promise.allSettled([
-      api.graph(graphWindow), api.summary(), api.internalActivity(), api.vms(),
+      api.graph(graphWindow), api.summary(), api.internalActivity(internalActivityLimit, internalActivityWindow), api.vms(),
     ])
     if (nextVMs.status === 'fulfilled') {
       vmInventory.current = nextVMs.value.map(vmToGraphNode)
@@ -340,7 +351,11 @@ export function App() {
 
   return <main className="app-shell">
     <header className="app-header">
-      <div className="live-state"><i className={connected ? 'connected' : ''} /><span>{connected ? 'Realtime connected' : 'Realtime reconnecting'}</span></div>
+      <div className="header-actions">
+        <a className="grafana-link" href={GRAFANA_L4_URL} target="_blank" rel="noreferrer">Grafana L4</a>
+        <a className="grafana-link" href={GRAFANA_L7_URL} target="_blank" rel="noreferrer">Grafana L7</a>
+        <div className="live-state"><i className={connected ? 'connected' : ''} /><span>{connected ? 'Realtime connected' : 'Realtime reconnecting'}</span></div>
+      </div>
     </header>
     {error && <div className="error-banner"><strong>Backend unavailable</strong><span>{error}</span></div>}
     <StatCards summary={summary} />
@@ -369,9 +384,9 @@ export function App() {
         </button>)}
       </div>
       {activityView === 'internal'
-        ? <InternalActivityTable activity={internalActivity} />
+        ? <InternalActivityTable activity={internalActivity} windowLabel={internalActivityWindow} limit={internalActivityLimit} />
         : <DeepFlowFlowTable raw={deepFlowRaw} health={deepFlowHealth} mode={activityView} />}
     </section>
-    <footer><span></span><span>{vmCount} VMs · {relationshipCount} relationships</span></footer>
+    <footer><span>Topology window {graphWindowLabel} · DeepFlow log window {deepFlowWindowLabel}</span><span>{vmCount} VMs · {relationshipCount} relationships</span></footer>
   </main>
 }

@@ -11,11 +11,19 @@ function activityTime(value: string) {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 }
 
-export function InternalActivityTable({ activity }: { activity: InternalActivity[] }) {
+export function InternalActivityTable({
+  activity,
+  windowLabel,
+  limit,
+}: {
+  activity: InternalActivity[]
+  windowLabel: string
+  limit: number
+}) {
   return <section className="activity-card">
     <div className="activity-heading">
-      <div><small>INTERNAL ACTIVITY</small><span>Registered VM-to-VM observations</span></div>
-      <span>{activity.length} recent observations</span>
+      <div><small>INTERNAL ACTIVITY</small><span>Registered VM-to-VM observations · short realtime window</span></div>
+      <span>{activity.length}/{limit} latest · {windowLabel}</span>
     </div>
     <div className="activity-table-wrap">
       <table className="activity-table">

@@ -27,8 +27,8 @@ export function DeepFlowFlowTable({
   mode: DeepFlowTableMode
 }) {
   const state = healthState(health)
-  const l4Rows = raw?.l4.slice(0, 100) ?? []
-  const l7Rows = raw?.l7.slice(0, 100) ?? []
+  const l4Rows = raw?.l4.slice(0, 200) ?? []
+  const l7Rows = raw?.l7.slice(0, 200) ?? []
   const isL4 = mode === 'l4'
 
   return <section className="activity-card deepflow-card">
@@ -37,7 +37,10 @@ export function DeepFlowFlowTable({
         <small>{isL4 ? 'DEEPFLOW L4 FLOWS' : 'DEEPFLOW L7 REQUESTS'}</small>
         <span>{isL4 ? 'Network flow telemetry after inventory filtering' : 'Application request telemetry after inventory filtering'}</span>
       </div>
-      <span className={`deepflow-state deepflow-${state}`}>{state}</span>
+      <div className="deepflow-heading-meta">
+        {raw ? <small>{isL4 ? l4Rows.length : l7Rows.length}/{raw.limit} rows · {raw.window}</small> : null}
+        <span className={`deepflow-state deepflow-${state}`}>{state}</span>
+      </div>
     </div>
     {health?.warnings?.length ? <div className="deepflow-note">{health.warnings.slice(0, 2).join(' · ')}</div> : null}
     {health?.errors?.length ? <div className="deepflow-note error">{health.errors.slice(0, 2).join(' · ')}</div> : null}
