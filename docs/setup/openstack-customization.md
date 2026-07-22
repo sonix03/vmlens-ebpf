@@ -12,7 +12,7 @@ OpenStack calls this feature `Customization Script`. It is the same idea as
 If you want to upload a file instead of copy-pasting, use:
 
 ```text
-configuration/openstack-vmlens-cloud-init.yaml
+deploy/openstack/openstack-vmlens-cloud-init.yaml
 ```
 
 In OpenStack:
