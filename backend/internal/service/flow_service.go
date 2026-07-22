@@ -200,9 +200,12 @@ func (s *FlowService) List(ctx context.Context, limit int) ([]model.Flow, error)
 	return flows, rows.Err()
 }
 
-func (s *FlowService) ListInternalActivity(ctx context.Context, limit int) ([]model.InternalActivity, error) {
+func (s *FlowService) ListInternalActivity(ctx context.Context, limit int, window time.Duration) ([]model.InternalActivity, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
+	}
+	if window <= 0 {
+		window = 5 * time.Minute
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT f.id::text, f.src_vm_id, COALESCE(observer.name, ''), host(f.src_ip),
@@ -214,8 +217,9 @@ func (s *FlowService) ListInternalActivity(ctx context.Context, limit int) ([]mo
 		JOIN vms peer ON peer.id = f.dst_vm_id
 		WHERE f.scope IN ('internal_same_tenant', 'internal_cross_tenant')
 		  AND (f.request_count > 0 OR f.connection_count > 0)
+		  AND f.observed_at >= NOW() - $2::interval
 		ORDER BY f.observed_at DESC
-		LIMIT $1`, limit)
+		LIMIT $1`, limit, fmt.Sprintf("%f seconds", window.Seconds()))
 	if err != nil {
 		return nil, err
 	}

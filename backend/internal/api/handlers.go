@@ -104,7 +104,16 @@ func (h *Handlers) ListFlows(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) ListInternalActivity(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	result, err := h.Flows.ListInternalActivity(r.Context(), limit)
+	window := 5 * time.Minute
+	if raw := r.URL.Query().Get("time_range"); raw != "" {
+		duration, err := parseDuration(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid time_range: %w", err).Error())
+			return
+		}
+		window = duration
+	}
+	result, err := h.Flows.ListInternalActivity(r.Context(), limit, window)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
