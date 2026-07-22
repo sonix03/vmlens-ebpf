@@ -16,9 +16,9 @@
 VMLens observes VM-to-VM and VM-to-external network relationships, then shows
 them as live topology lines in a local dashboard.
 
-DeepFlow can also be used as an external L4/L7 telemetry source. In that mode,
-VMLens reads DeepFlow raw rows, filters them by VM inventory, deduplicates tap
-side duplicates, and renders VM-centric topology edges. See
+DeepFlow is packaged as an optional local compose overlay for L4/L7 telemetry.
+In that mode, VMLens reads DeepFlow raw rows, filters them by VM inventory,
+deduplicates tap side duplicates, and renders VM-centric topology edges. See
 [docs/deepflow-integration.md](./docs/deepflow-integration.md).
 
 It is designed for development and lab environments where the dashboard runs on
@@ -139,10 +139,35 @@ keeping unregistered private service VMs counted as `external_private`.
 
 ### 1. Start local dashboard
 
-Run on your local laptop/PC:
+Recommended full local stack with DeepFlow:
 
 ```bash
-docker compose up -d --build
+bash scripts/vmlens-stack.sh start
+```
+
+This starts:
+
+```text
+VMLens dashboard     http://localhost:3000
+VMLens API           http://localhost:8080
+DeepFlow Grafana     http://localhost:3001
+DeepFlow ClickHouse  http://localhost:8123
+```
+
+The packaged DeepFlow stack starts the central DeepFlow services. DeepFlow VM
+agents still need to be installed on the VMs you want DeepFlow to observe. The
+VMLens agent remains the realtime source for live topology lines.
+
+Core VMLens only, without DeepFlow:
+
+```bash
+bash scripts/vmlens-stack.sh start --core
+```
+
+Raw Docker Compose equivalent for the full stack:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d --build
 ```
 
 Check:
