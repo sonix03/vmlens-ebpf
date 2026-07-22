@@ -27,6 +27,60 @@ VMLens deduplicates duplicated L7 rows by priority:
 s-p > s > c-p > c
 ```
 
+## Integrated VMLens + DeepFlow stack
+
+DeepFlow is packaged in this repository as an optional compose overlay:
+
+```text
+docker-compose.yml            # VMLens core: dashboard, control-plane, Postgres
+docker-compose.deepflow.yml   # DeepFlow: ClickHouse, server, app, Grafana, MySQL
+deploy/deepflow/common        # DeepFlow container config mounted by compose
+```
+
+Start the full local stack from the `vmlens-ebpf` repository:
+
+```bash
+bash scripts/vmlens-stack.sh start
+```
+
+Equivalent raw Docker command:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d --build
+```
+
+Stop the full stack:
+
+```bash
+bash scripts/vmlens-stack.sh stop
+```
+
+Start only VMLens without DeepFlow:
+
+```bash
+bash scripts/vmlens-stack.sh start --core
+```
+
+Check health:
+
+```bash
+bash scripts/vmlens-stack.sh health
+```
+
+The integrated stack starts DeepFlow's central services only. It does not
+install DeepFlow agents into cloud VMs. VMLens can still draw realtime topology
+lines from its own TC/eBPF agent, while DeepFlow L4/L7 tables populate after
+DeepFlow agents send telemetry to the integrated DeepFlow server.
+
+When `docker-compose.deepflow.yml` is used, the VMLens control-plane connects to
+DeepFlow through Docker service names:
+
+```text
+DEEPFLOW_CLICKHOUSE_URL=http://deepflow-clickhouse:8123
+DEEPFLOW_QUERIER_URL=http://deepflow-server:20416
+DEEPFLOW_CONTROLLER_URL=http://deepflow-server:20417
+```
+
 ## Local DeepFlow services
 
 Expected local lab endpoints:
@@ -39,7 +93,7 @@ ClickHouse     http://localhost:8123
 Container      deepflow-clickhouse
 ```
 
-If ClickHouse is not exposed on `localhost:8123`, either expose it from the
+If DeepFlow is run outside this repository and ClickHouse is not exposed on `localhost:8123`, either expose it from the
 DeepFlow compose stack or put the vmlens control-plane container on the same
 Docker network and set:
 
