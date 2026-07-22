@@ -98,7 +98,8 @@ traffic: 10.20.20.130 -> 10.20.20.199:8081
 result: 20/20 HTTP 200, internal flows and request counters increased
 ```
 
-Full copy-paste E2E notes are in [SONI.txt](./SONI.txt).
+Full copy-paste E2E notes are in
+[docs/runbooks/e2e-setup.md](./docs/runbooks/e2e-setup.md).
 
 For external private service VMs across zones, use the dedicated flow in
 [docs/external-multizone-tracking.md](./docs/external-multizone-tracking.md).
@@ -401,11 +402,11 @@ backend/      Go control-plane API and migrations
 frontend/     React dashboard
 scripts/      tunnel, install, release and agent helpers
 configs/      local tunnel/VM profile examples
-configuration/OpenStack cloud-init examples
-instructions/ communication test commands
-docs/         architecture, privacy and prebuilt agent notes
+deploy/       Docker Compose overlays, DeepFlow config and OpenStack cloud-init
+docs/         setup guides, runbooks, architecture and privacy notes
+  setup/      local/cloud setup and OpenStack customization docs
+  runbooks/   E2E command flows and communication test recipes
 legacy/       older v1 prototype stack kept for reference
-SONI.txt      tested E2E command flow from zero
 ```
 
 ## API quick reference
@@ -450,9 +451,11 @@ ingest authorization.
 
 ## More docs
 
-- [SONI.txt](./SONI.txt) — tested E2E flow from zero.
-- [SETUP.md](./SETUP.md) — setup notes.
-- [CONFIGURATION.md](./CONFIGURATION.md) — OpenStack/user-data configuration.
-- [INSTRUCTION.md](./INSTRUCTION.md) — communication test catalog.
+- [docs/setup/local-cloud.md](./docs/setup/local-cloud.md) — local dashboard and cloud VM setup.
+- [docs/setup/openstack-customization.md](./docs/setup/openstack-customization.md) — OpenStack/user-data configuration.
+- [docs/runbooks/e2e-setup.md](./docs/runbooks/e2e-setup.md) — tested E2E flow from zero.
+- [docs/runbooks/communication-catalog.md](./docs/runbooks/communication-catalog.md) — communication test catalog.
+- [docs/runbooks/communications](./docs/runbooks/communications) — copy-paste traffic test commands.
+- [deploy/openstack](./deploy/openstack) — cloud-init files for OpenStack.
 - [docs/prebuilt-agent.md](./docs/prebuilt-agent.md) — release artifact flow.
 - [docs/privacy.md](./docs/privacy.md) — privacy boundary.

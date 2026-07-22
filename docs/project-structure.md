@@ -1,7 +1,7 @@
 # Project Structure
 
-VMLens keeps the active product stack at the repository root and moves older
-prototype code into `legacy/`.
+VMLens keeps the active product stack at the repository root and moves setup
+notes, runbooks and deployment files into purpose-specific folders.
 
 The root uses `go.work` to group the active Go modules. From the repository
 root, use `make test`; run raw `go test ./...` inside `agent/` or `backend/`.
@@ -13,11 +13,27 @@ agent/          VM-side telemetry agent
 backend/        control-plane API, graph, stats, database migrations
 frontend/       dashboard UI
 scripts/        active operator scripts for tunnels, agent install, release, tests
-configuration/  OpenStack cloud-init / customization scripts
 configs/        local operator config examples
-instructions/   copy-paste communication test recipes
-docs/           architecture and operations notes
+deploy/         runtime/deployment assets
+docs/           architecture, setup guides and operations notes
 legacy/         old v1 prototype stack, kept for reference
+```
+
+## Deploy layout
+
+```text
+deploy/
+  deepflow/      local DeepFlow service config used by docker-compose.deepflow.yml
+  openstack/     OpenStack cloud-init / Customization Script files
+```
+
+## Documentation layout
+
+```text
+docs/
+  setup/         local/cloud setup guides
+  runbooks/      repeatable command flows
+    communications/  copy-paste VM communication test recipes
 ```
 
 ## Local operator config
