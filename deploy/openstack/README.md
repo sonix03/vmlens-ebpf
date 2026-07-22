@@ -8,7 +8,7 @@ Use this when the VM is allowed to install Go, clang, libbpf-dev, and compile
 the agent during boot:
 
 ```text
-configuration/openstack-vmlens-cloud-init.yaml
+deploy/openstack/openstack-vmlens-cloud-init.yaml
 ```
 
 ## Option B: install prebuilt release artifacts
@@ -16,7 +16,7 @@ configuration/openstack-vmlens-cloud-init.yaml
 Use this when GitHub Release already has precompiled assets:
 
 ```text
-configuration/openstack-vmlens-prebuilt-cloud-init.yaml
+deploy/openstack/openstack-vmlens-prebuilt-cloud-init.yaml
 ```
 
 Required release assets:

@@ -60,7 +60,7 @@ sudo env \
 Use this OpenStack Customization Script:
 
 ```text
-configuration/openstack-vmlens-prebuilt-cloud-init.yaml
+deploy/openstack/openstack-vmlens-prebuilt-cloud-init.yaml
 ```
 
 The VM only installs:
