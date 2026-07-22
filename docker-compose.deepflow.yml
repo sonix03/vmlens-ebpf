@@ -1,0 +1,156 @@
+services:
+  control-plane:
+    environment:
+      DEEPFLOW_ENABLED: "true"
+      DEEPFLOW_CLICKHOUSE_URL: http://deepflow-clickhouse:8123
+      DEEPFLOW_CLICKHOUSE_DATABASE: default
+      DEEPFLOW_CLICKHOUSE_USERNAME: default
+      DEEPFLOW_CLICKHOUSE_PASSWORD: ""
+      DEEPFLOW_QUERIER_URL: http://deepflow-server:20416
+      DEEPFLOW_CONTROLLER_URL: http://deepflow-server:20417
+    depends_on:
+      deepflow-clickhouse:
+        condition: service_started
+      deepflow-server:
+        condition: service_started
+
+  deepflow-mysql:
+    image: registry.cn-hongkong.aliyuncs.com/deepflow-ce/mysql:8.0.31
+    restart: unless-stopped
+    command:
+      - mysqld
+      - --port=30130
+      - --bind-address=0.0.0.0
+      - --default-authentication-plugin=mysql_native_password
+      - --innodb-buffer-pool-size=20M
+      - --max-connections=1000
+      - --wait-timeout=60
+      - --slave-skip-errors=all
+      - --binlog-expire-logs-seconds=86400
+    environment:
+      MYSQL_ROOT_PASSWORD: deepflow
+      MYSQL_DATABASE: grafana
+      TZ: Asia/Shanghai
+    volumes:
+      - ./deploy/deepflow/common/config/mysql/my.cnf:/etc/my.cnf:ro
+      - ./deploy/deepflow/common/config/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - deepflow_mysql_data:/var/lib/mysql
+    networks:
+      default:
+        aliases:
+          - mysql
+
+  deepflow-clickhouse:
+    image: registry.cn-hongkong.aliyuncs.com/deepflow-ce/clickhouse-server:23.8.7.24
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ./deploy/deepflow/common/config/clickhouse/config.xml:/etc/clickhouse-server/config.xml:ro
+      - ./deploy/deepflow/common/config/clickhouse/users.xml:/etc/clickhouse-server/users.xml:ro
+      - deepflow_clickhouse_data:/var/lib/clickhouse
+      - deepflow_clickhouse_storage:/var/lib/clickhouse_storage
+    depends_on:
+      - deepflow-mysql
+    networks:
+      default:
+        aliases:
+          - clickhouse
+    ports:
+      - "8123:8123"
+
+  deepflow-app:
+    image: registry.cn-hongkong.aliyuncs.com/deepflow-ce/deepflow-app:${DEEPFLOW_VERSION:-v6.6.1}
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ./deploy/deepflow/common/config/deepflow-app/app.yaml:/etc/deepflow/app.yaml:ro
+    ports:
+      - "20418:20418"
+
+  deepflow-server:
+    image: registry.cn-hongkong.aliyuncs.com/deepflow-ce/deepflow-server:${DEEPFLOW_VERSION:-v6.6.1}
+    restart: unless-stopped
+    environment:
+      DEEPFLOW_SERVER_RUNNING_MODE: STANDALONE
+      K8S_POD_IP_FOR_DEEPFLOW: 127.0.0.1
+      K8S_NODE_IP_FOR_DEEPFLOW: ${DEEPFLOW_NODE_IP:-127.0.0.1}
+      K8S_NAMESPACE_FOR_DEEPFLOW: deepflow
+      K8S_NODE_NAME_FOR_DEEPFLOW: deepflow-host
+      K8S_POD_NAME_FOR_DEEPFLOW: deepflow-container
+      TZ: Asia/Shanghai
+    volumes:
+      - ./deploy/deepflow/common/config/deepflow-server/server.yaml:/etc/server.yaml:ro
+    depends_on:
+      - deepflow-mysql
+      - deepflow-clickhouse
+      - deepflow-app
+    ports:
+      - "20416:20416"
+      - "20419:20419"
+      - "30417:20417"
+      - "30035:20035"
+      - "30033:20033"
+
+  deepflow-grafana-init-worksdir:
+    image: registry.cn-hongkong.aliyuncs.com/deepflow-ce/deepflowio-init-grafana-ds-dh:latest
+    command: /bin/sh -c "rm -rf /tmp/dashboards/*; rm -rf /var/lib/grafana/plugins/*"
+    volumes:
+      - deepflow_grafana_dashboards:/tmp/dashboards
+      - deepflow_grafana_plugins:/var/lib/grafana/plugins
+      - deepflow_grafana_provisioning_dashboards:/etc/grafana/provisioning/dashboards
+
+  deepflow-grafana-init-grafana-ds-dh:
+    image: registry.cn-hongkong.aliyuncs.com/deepflow-ce/deepflowio-init-grafana-ds-dh:latest
+    volumes:
+      - deepflow_grafana_dashboards:/tmp/dashboards
+      - deepflow_grafana_plugins:/var/lib/grafana/plugins
+      - deepflow_grafana_provisioning_dashboards:/etc/grafana/provisioning/dashboards
+      - deepflow_grafana_provisioning_datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - deepflow-grafana-init-worksdir
+
+  deepflow-grafana-init-custom-plugins:
+    image: registry.cn-hongkong.aliyuncs.com/deepflow-ce/deepflowio-init-grafana:latest
+    volumes:
+      - deepflow_grafana_dashboards:/tmp/dashboards
+      - deepflow_grafana_plugins:/var/lib/grafana/plugins
+    depends_on:
+      - deepflow-grafana-init-worksdir
+
+  deepflow-grafana:
+    image: registry.cn-hongkong.aliyuncs.com/deepflow-ce/grafana:10.1.5
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: deepflow
+      DEEPFLOW_REQUEST_URL: http://deepflow-server:20416
+      DEEPFLOW_TRACEURL: http://deepflow-app:20418
+      MYSQL_URL: deepflow-mysql:30130
+      MYSQL_USER: root
+      MYSQL_PASSWORD: deepflow
+      CLICKHOUSE_SERVER: deepflow-clickhouse
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+    volumes:
+      - ./deploy/deepflow/common/config/grafana/grafana.ini:/etc/grafana/grafana.ini:ro
+      - deepflow_grafana_dashboards:/tmp/dashboards
+      - deepflow_grafana_plugins:/var/lib/grafana/plugins
+      - deepflow_grafana_provisioning_dashboards:/etc/grafana/provisioning/dashboards
+      - deepflow_grafana_provisioning_datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - deepflow-grafana-init-grafana-ds-dh
+      - deepflow-grafana-init-custom-plugins
+    ports:
+      - "3001:3000"
+
+volumes:
+  deepflow_mysql_data:
+  deepflow_clickhouse_data:
+  deepflow_clickhouse_storage:
+  deepflow_grafana_dashboards:
+  deepflow_grafana_plugins:
+  deepflow_grafana_provisioning_dashboards:
+  deepflow_grafana_provisioning_datasources:
