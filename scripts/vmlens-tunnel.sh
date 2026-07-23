@@ -25,6 +25,11 @@ Env override:
   VMLENS_SSH_KEY=~/.ssh/id_ed25519_vmlens | agent | none
   VMLENS_LOCAL_BACKEND=127.0.0.1:8080
   VMLENS_REMOTE_BACKEND=127.0.0.1:18080
+  VMLENS_TUNNEL_DEEPFLOW=true
+  VMLENS_LOCAL_DEEPFLOW_CONTROLLER=127.0.0.1:30035
+  VMLENS_REMOTE_DEEPFLOW_CONTROLLER=127.0.0.1:30035
+  VMLENS_LOCAL_DEEPFLOW_INGESTER=127.0.0.1:30033
+  VMLENS_REMOTE_DEEPFLOW_INGESTER=127.0.0.1:30033
   VMLENS_VM_PROFILES="testing_a_1 testing_a_2"
   VMLENS_VM_INVENTORY=configs/vms.local  # optional legacy file
 EOF
@@ -97,6 +102,11 @@ fi
 default_ssh_key="${default_ssh_key:-~/.ssh/id_ed25519_vmlens}"
 default_local_backend="${LOCAL_BACKEND:-${VMLENS_LOCAL_BACKEND:-127.0.0.1:8080}}"
 default_remote_backend="${REMOTE_BACKEND:-${VMLENS_REMOTE_BACKEND:-127.0.0.1:18080}}"
+default_tunnel_deepflow="${VMLENS_TUNNEL_DEEPFLOW:-true}"
+default_local_deepflow_controller="${LOCAL_DEEPFLOW_CONTROLLER:-${VMLENS_LOCAL_DEEPFLOW_CONTROLLER:-127.0.0.1:30035}}"
+default_remote_deepflow_controller="${REMOTE_DEEPFLOW_CONTROLLER:-${VMLENS_REMOTE_DEEPFLOW_CONTROLLER:-127.0.0.1:30035}}"
+default_local_deepflow_ingester="${LOCAL_DEEPFLOW_INGESTER:-${VMLENS_LOCAL_DEEPFLOW_INGESTER:-127.0.0.1:30033}}"
+default_remote_deepflow_ingester="${REMOTE_DEEPFLOW_INGESTER:-${VMLENS_REMOTE_DEEPFLOW_INGESTER:-127.0.0.1:30033}}"
 state_dir="$(expand_path "${VMLENS_TUNNEL_STATE_DIR:-${HOME}/.vmlens/tunnels}")"
 key_state_dir="$(expand_path "${VMLENS_KEY_STATE_DIR:-${HOME}/.vmlens/keys}")"
 vm_profiles="${VMLENS_VM_PROFILES:-}"
@@ -132,6 +142,13 @@ has_env_profiles() {
   [[ -n "${vm_profiles// }" ]]
 }
 
+is_true() {
+  case "${1:-}" in
+    true|TRUE|1|yes|YES|y|Y|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 load_defaults() {
   vm_alias="${1:-}"
   vm_host="${1:-}"
@@ -139,17 +156,27 @@ load_defaults() {
   ssh_key="${default_ssh_key}"
   local_backend="${default_local_backend}"
   remote_backend="${default_remote_backend}"
+  tunnel_deepflow="${default_tunnel_deepflow}"
+  local_deepflow_controller="${default_local_deepflow_controller}"
+  remote_deepflow_controller="${default_remote_deepflow_controller}"
+  local_deepflow_ingester="${default_local_deepflow_ingester}"
+  remote_deepflow_ingester="${default_remote_deepflow_ingester}"
 }
 
 apply_profile() {
   local profile="$1"
-  local alias host user key remote local
+  local alias host user key remote local deepflow df_remote_controller df_local_controller df_remote_ingester df_local_ingester
   alias="$(profile_value "${profile}" "ALIAS")"
   host="$(profile_value "${profile}" "HOST")"
   user="$(profile_value "${profile}" "SSH_USER")"
   key="$(profile_value "${profile}" "SSH_KEY")"
   remote="$(profile_value "${profile}" "REMOTE_BACKEND")"
   local="$(profile_value "${profile}" "LOCAL_BACKEND")"
+  deepflow="$(profile_value "${profile}" "TUNNEL_DEEPFLOW")"
+  df_remote_controller="$(profile_value "${profile}" "REMOTE_DEEPFLOW_CONTROLLER")"
+  df_local_controller="$(profile_value "${profile}" "LOCAL_DEEPFLOW_CONTROLLER")"
+  df_remote_ingester="$(profile_value "${profile}" "REMOTE_DEEPFLOW_INGESTER")"
+  df_local_ingester="$(profile_value "${profile}" "LOCAL_DEEPFLOW_INGESTER")"
 
   vm_alias="${alias:-${profile}}"
   vm_host="${host:-${vm_alias}}"
@@ -157,6 +184,11 @@ apply_profile() {
   [[ -n "${key:-}" && "${key}" != "-" ]] && ssh_key="${key}"
   [[ -n "${remote:-}" && "${remote}" != "-" ]] && remote_backend="${remote}"
   [[ -n "${local:-}" && "${local}" != "-" ]] && local_backend="${local}"
+  [[ -n "${deepflow:-}" && "${deepflow}" != "-" ]] && tunnel_deepflow="${deepflow}"
+  [[ -n "${df_remote_controller:-}" && "${df_remote_controller}" != "-" ]] && remote_deepflow_controller="${df_remote_controller}"
+  [[ -n "${df_local_controller:-}" && "${df_local_controller}" != "-" ]] && local_deepflow_controller="${df_local_controller}"
+  [[ -n "${df_remote_ingester:-}" && "${df_remote_ingester}" != "-" ]] && remote_deepflow_ingester="${df_remote_ingester}"
+  [[ -n "${df_local_ingester:-}" && "${df_local_ingester}" != "-" ]] && local_deepflow_ingester="${df_local_ingester}"
   return 0
 }
 
@@ -169,13 +201,14 @@ print_vm_row() {
   else
     display_key="$(expand_path "${ssh_key}")"
   fi
-  printf '%-16s %-16s %-10s %-58s %-22s %-22s\n' \
+  printf '%-16s %-16s %-10s %-58s %-22s %-22s %-9s\n' \
     "${vm_alias}" \
     "${vm_host}" \
     "${ssh_user}" \
     "${display_key}" \
     "${remote_backend}" \
-    "${local_backend}"
+    "${local_backend}" \
+    "${tunnel_deepflow}"
 }
 
 for_each_vm() {
@@ -200,7 +233,7 @@ for_each_vm() {
 }
 
 list_vms() {
-  printf '%-16s %-16s %-10s %-58s %-22s %-22s\n' "ALIAS" "HOST" "USER" "KEY" "REMOTE_BACKEND" "LOCAL_BACKEND"
+  printf '%-16s %-16s %-10s %-58s %-22s %-22s %-9s\n' "ALIAS" "HOST" "USER" "KEY" "REMOTE_BACKEND" "LOCAL_BACKEND" "DEEPFLOW"
   for_each_vm print_vm_row
 }
 
@@ -286,7 +319,7 @@ case "${action}" in
       usage >&2
       exit 1
     fi
-    printf '%-16s %-16s %-10s %-58s %-22s %-22s\n' "ALIAS" "HOST" "USER" "KEY" "REMOTE_BACKEND" "LOCAL_BACKEND"
+    printf '%-16s %-16s %-10s %-58s %-22s %-22s %-9s\n' "ALIAS" "HOST" "USER" "KEY" "REMOTE_BACKEND" "LOCAL_BACKEND" "DEEPFLOW"
     print_vm_row "${vm_host}"
     exit $?
     ;;
@@ -341,8 +374,25 @@ start_tunnel() {
     echo "VMLens tunnel already running for ${vm_alias}: ${target}"
     return
   fi
-  "${ssh_common[@]}" -M -fN -R "${remote_backend}:${local_backend}" "${target}"
-  echo "VMLens tunnel started: ${vm_alias} ${target} ${remote_backend} -> ${local_backend}"
+  local forwards=(
+    -R "${remote_backend}:${local_backend}"
+  )
+  local forward_summary=(
+    "${remote_backend} -> ${local_backend}"
+  )
+  if is_true "${tunnel_deepflow}"; then
+    forwards+=(
+      -R "${remote_deepflow_controller}:${local_deepflow_controller}"
+      -R "${remote_deepflow_ingester}:${local_deepflow_ingester}"
+    )
+    forward_summary+=(
+      "${remote_deepflow_controller} -> ${local_deepflow_controller}"
+      "${remote_deepflow_ingester} -> ${local_deepflow_ingester}"
+    )
+  fi
+  "${ssh_common[@]}" -M -fN "${forwards[@]}" "${target}"
+  echo "VMLens tunnel started: ${vm_alias} ${target}"
+  printf '  %s\n' "${forward_summary[@]}"
 }
 
 stop_tunnel() {

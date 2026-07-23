@@ -55,6 +55,60 @@ sudo env \
   bash scripts/vmlens-agent.sh start
 ```
 
+## Install VMLens + DeepFlow agent from prebuilt release
+
+Use this when the local stack is started with DeepFlow and the VM should send:
+
+- realtime topology metadata to VMLens;
+- L4/L7 telemetry to the integrated DeepFlow server.
+
+Start the tunnel from local first:
+
+```bash
+bash scripts/vmlens-tunnel.sh start <VM_IP> ~/.vmlens/keys/id_ed25519_vmlens
+```
+
+Then run on the VM:
+
+```bash
+curl -fsSL -o /tmp/vmlens-install-agent.sh \
+  https://github.com/sonix03/vmlens-ebpf/releases/latest/download/install-agent.sh
+
+chmod +x /tmp/vmlens-install-agent.sh
+
+sudo env \
+  INSTALL_MODE=prebuilt \
+  AGENT_BINARY_URL=https://github.com/sonix03/vmlens-ebpf/releases/latest/download/vmlens-agent-linux-amd64 \
+  BPF_OBJECT_URL=https://github.com/sonix03/vmlens-ebpf/releases/latest/download/flow_tracker-linux-amd64.bpf.o \
+  BACKEND_URL=http://127.0.0.1:18080 \
+  MOCK_MODE=false \
+  FLOW_INTERVAL=1s \
+  CAPTURE_MODE=tc \
+  CAPTURE_INTERFACE=ens3 \
+  INSTALL_DEEPFLOW_AGENT=true \
+  INSTALL_DEEPFLOW_RELAY=true \
+  DEEPFLOW_AGENT_VERSION=v6.6.1 \
+  bash /tmp/vmlens-install-agent.sh
+```
+
+The DeepFlow relay exposes the tunneled controller/ingester ports on the VM
+interface. This lets the DeepFlow agent connect through the same SSH tunnel
+without exposing local laptop ports publicly.
+
+Check:
+
+```bash
+systemctl is-active vmlens-agent
+systemctl is-active deepflow-agent
+systemctl is-active vmlens-deepflow-controller-relay
+systemctl is-active vmlens-deepflow-ingester-relay
+sudo journalctl -u deepflow-agent -n 80 --no-pager
+```
+
+Recommended VM size for the combined VMLens + DeepFlow agent is at least 1 GB
+RAM. Very small 512 MB lab VMs can work with swap, but the DeepFlow agent may
+hit memory circuit breakers under load.
+
 ## Install prebuilt artifacts on a VM without git clone
 
 Use this OpenStack Customization Script:

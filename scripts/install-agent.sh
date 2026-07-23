@@ -29,6 +29,26 @@ AGENT_BINARY_PATH="${AGENT_BINARY_PATH:-}"
 BPF_OBJECT_URL="${BPF_OBJECT_URL:-}"
 BPF_OBJECT_PATH="${BPF_OBJECT_PATH:-}"
 
+# Optional DeepFlow agent install. This keeps the VM setup in one installer
+# without making DeepFlow mandatory for the realtime VMLens agent.
+INSTALL_DEEPFLOW_AGENT="${INSTALL_DEEPFLOW_AGENT:-false}"
+DEEPFLOW_AGENT_VERSION="${DEEPFLOW_AGENT_VERSION:-v6.6.1}"
+DEEPFLOW_AGENT_URL="${DEEPFLOW_AGENT_URL:-}"
+DEEPFLOW_AGENT_STATIC_LINK="${DEEPFLOW_AGENT_STATIC_LINK:-false}"
+DEEPFLOW_AGENT_CONTROLLER_IPS="${DEEPFLOW_AGENT_CONTROLLER_IPS:-127.0.0.1}"
+DEEPFLOW_AGENT_CONTROLLER_PORT="${DEEPFLOW_AGENT_CONTROLLER_PORT:-30035}"
+DEEPFLOW_AGENT_VTAP_GROUP_ID_REQUEST="${DEEPFLOW_AGENT_VTAP_GROUP_ID_REQUEST:-}"
+DEEPFLOW_AGENT_TEAM_ID="${DEEPFLOW_AGENT_TEAM_ID:-}"
+DEEPFLOW_AGENT_OVERRIDE_HOSTNAME="${DEEPFLOW_AGENT_OVERRIDE_HOSTNAME:-}"
+DEEPFLOW_AGENT_UNIQUE_IDENTIFIER="${DEEPFLOW_AGENT_UNIQUE_IDENTIFIER:-ip-and-mac}"
+DEEPFLOW_AGENT_LOG_FILE="${DEEPFLOW_AGENT_LOG_FILE:-/var/log/deepflow-agent/deepflow-agent.log}"
+INSTALL_DEEPFLOW_RELAY="${INSTALL_DEEPFLOW_RELAY:-false}"
+DEEPFLOW_RELAY_BIND="${DEEPFLOW_RELAY_BIND:-}"
+DEEPFLOW_RELAY_CONTROLLER_LISTEN="${DEEPFLOW_RELAY_CONTROLLER_LISTEN:-30035}"
+DEEPFLOW_RELAY_CONTROLLER_TARGET="${DEEPFLOW_RELAY_CONTROLLER_TARGET:-127.0.0.1:30035}"
+DEEPFLOW_RELAY_INGESTER_LISTEN="${DEEPFLOW_RELAY_INGESTER_LISTEN:-30033}"
+DEEPFLOW_RELAY_INGESTER_TARGET="${DEEPFLOW_RELAY_INGESTER_TARGET:-127.0.0.1:30033}"
+
 if [[ -z "${BACKEND_URL}" ]]; then
   echo "BACKEND_URL is required" >&2
   exit 1
@@ -100,6 +120,19 @@ default_route_interface() {
   ip route show default 2>/dev/null | awk '{print $5; exit}'
 }
 
+default_route_ip() {
+  ip -4 route get 1.1.1.1 2>/dev/null | awk '
+    {
+      for (i = 1; i <= NF; i++) {
+        if ($i == "src") {
+          print $(i + 1)
+          exit
+        }
+      }
+    }
+  '
+}
+
 resolve_capture_interface() {
   case "${CAPTURE_MODE}" in
     tc|auto) ;;
@@ -123,6 +156,18 @@ resolve_capture_interface() {
   fi
 }
 
+resolve_deepflow_relay_config() {
+  is_true "${INSTALL_DEEPFLOW_RELAY}" || return 0
+  if [[ -z "${DEEPFLOW_RELAY_BIND}" ]]; then
+    DEEPFLOW_RELAY_BIND="$(default_route_ip || true)"
+  fi
+  DEEPFLOW_RELAY_BIND="${DEEPFLOW_RELAY_BIND:-0.0.0.0}"
+
+  if is_true "${INSTALL_DEEPFLOW_AGENT}" && [[ "${DEEPFLOW_AGENT_CONTROLLER_IPS}" == "127.0.0.1" && "${DEEPFLOW_RELAY_BIND}" != "0.0.0.0" ]]; then
+    DEEPFLOW_AGENT_CONTROLLER_IPS="${DEEPFLOW_RELAY_BIND}"
+  fi
+}
+
 download_file() {
   local url="$1"
   local destination="$2"
@@ -136,6 +181,200 @@ download_file() {
   fi
   echo "curl or wget is required to download ${url}" >&2
   return 1
+}
+
+is_true() {
+  case "${1:-}" in
+    true|TRUE|1|yes|YES|y|Y|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+release_arch() {
+  case "$(uname -m)" in
+    x86_64) printf '%s\n' amd64 ;;
+    aarch64|arm64) printf '%s\n' arm64 ;;
+    *) echo "unsupported architecture: $(uname -m)" >&2; return 1 ;;
+  esac
+}
+
+yaml_quote() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '"%s"' "${value}"
+}
+
+write_deepflow_agent_config() {
+  install -d -m0755 "$(dirname "${DEEPFLOW_AGENT_LOG_FILE}")"
+
+  {
+    echo "controller-ips:"
+    local ip
+    for ip in ${DEEPFLOW_AGENT_CONTROLLER_IPS//,/ }; do
+      [[ -n "${ip}" ]] && echo "  - ${ip}"
+    done
+    echo "controller-port: ${DEEPFLOW_AGENT_CONTROLLER_PORT}"
+    echo "log-file: $(yaml_quote "${DEEPFLOW_AGENT_LOG_FILE}")"
+    echo "agent-unique-identifier: $(yaml_quote "${DEEPFLOW_AGENT_UNIQUE_IDENTIFIER}")"
+    if [[ -n "${DEEPFLOW_AGENT_VTAP_GROUP_ID_REQUEST}" ]]; then
+      echo "vtap-group-id-request: $(yaml_quote "${DEEPFLOW_AGENT_VTAP_GROUP_ID_REQUEST}")"
+    fi
+    if [[ -n "${DEEPFLOW_AGENT_TEAM_ID}" ]]; then
+      echo "team-id: $(yaml_quote "${DEEPFLOW_AGENT_TEAM_ID}")"
+    fi
+    if [[ -n "${DEEPFLOW_AGENT_OVERRIDE_HOSTNAME}" ]]; then
+      echo "override-os-hostname: $(yaml_quote "${DEEPFLOW_AGENT_OVERRIDE_HOSTNAME}")"
+    fi
+  } >/etc/deepflow-agent.yaml
+
+  chmod 0644 /etc/deepflow-agent.yaml
+}
+
+install_deepflow_agent() {
+  is_true "${INSTALL_DEEPFLOW_AGENT}" || return 0
+  command -v tar >/dev/null || { echo "tar is required to install DeepFlow agent" >&2; exit 1; }
+
+  local arch url tmp_dir archive binary static_segment
+  arch="$(release_arch)"
+  static_segment=""
+  if is_true "${DEEPFLOW_AGENT_STATIC_LINK}"; then
+    static_segment="/static-link"
+  fi
+  url="${DEEPFLOW_AGENT_URL:-https://deepflow-ce.oss-cn-beijing.aliyuncs.com/bin/agent/${DEEPFLOW_AGENT_VERSION}/linux${static_segment}/${arch}/deepflow-agent.tar.gz}"
+
+  tmp_dir="$(mktemp -d)"
+  archive="${tmp_dir}/deepflow-agent.tar.gz"
+  download_file "${url}" "${archive}"
+  tar -xzf "${archive}" -C "${tmp_dir}"
+
+  binary="$(find "${tmp_dir}" -type f -name deepflow-agent | head -n 1 || true)"
+  [[ -n "${binary}" && -r "${binary}" ]] || { echo "deepflow-agent binary not found in ${archive}" >&2; exit 1; }
+  install -Dm0755 "${binary}" /usr/sbin/deepflow-agent
+  rm -rf "${tmp_dir}"
+
+  write_deepflow_agent_config
+
+  cat >/etc/systemd/system/deepflow-agent.service <<'EOF'
+[Unit]
+Description=deepflow-agent.service
+After=syslog.target network-online.target
+Wants=network-online.target
+
+[Service]
+Environment=GOTRACEBACK=single
+LimitCORE=1G
+ExecStart=/usr/sbin/deepflow-agent
+Restart=always
+RestartSec=10
+LimitNOFILE=1024:4096
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+install_deepflow_relay() {
+  is_true "${INSTALL_DEEPFLOW_RELAY}" || return 0
+  command -v python3 >/dev/null || { echo "python3 is required for DeepFlow local relay" >&2; exit 1; }
+
+  cat >/usr/local/bin/vmlens-tcp-relay <<'PY'
+#!/usr/bin/env python3
+import select
+import socket
+import sys
+import threading
+
+
+def pipe(left, right):
+    sockets = [left, right]
+    try:
+        while True:
+            readable, _, _ = select.select(sockets, [], [], 60)
+            if not readable:
+                continue
+            for src in readable:
+                data = src.recv(65536)
+                if not data:
+                    return
+                dst = right if src is left else left
+                dst.sendall(data)
+    except OSError:
+        return
+    finally:
+        for sock in sockets:
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+
+def handle(client, target_host, target_port):
+    try:
+        upstream = socket.create_connection((target_host, target_port), timeout=10)
+    except OSError:
+        client.close()
+        return
+    pipe(client, upstream)
+
+
+def main():
+    if len(sys.argv) != 4:
+        print("usage: vmlens-tcp-relay <bind_ip:listen_port> <target_ip:target_port> <name>", file=sys.stderr)
+        return 2
+    bind_host, bind_port_text = sys.argv[1].rsplit(":", 1)
+    target_host, target_port_text = sys.argv[2].rsplit(":", 1)
+    bind_port = int(bind_port_text)
+    target_port = int(target_port_text)
+
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind((bind_host, bind_port))
+    server.listen(128)
+    print(f"{sys.argv[3]} relay listening on {bind_host}:{bind_port} -> {target_host}:{target_port}", flush=True)
+    while True:
+        client, _ = server.accept()
+        threading.Thread(target=handle, args=(client, target_host, target_port), daemon=True).start()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+PY
+  chmod 0755 /usr/local/bin/vmlens-tcp-relay
+
+  cat >/etc/systemd/system/vmlens-deepflow-controller-relay.service <<EOF
+[Unit]
+Description=VMLens DeepFlow controller relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/vmlens-tcp-relay ${DEEPFLOW_RELAY_BIND}:${DEEPFLOW_RELAY_CONTROLLER_LISTEN} ${DEEPFLOW_RELAY_CONTROLLER_TARGET} deepflow-controller
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  cat >/etc/systemd/system/vmlens-deepflow-ingester-relay.service <<EOF
+[Unit]
+Description=VMLens DeepFlow ingester relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/vmlens-tcp-relay ${DEEPFLOW_RELAY_BIND}:${DEEPFLOW_RELAY_INGESTER_LISTEN} ${DEEPFLOW_RELAY_INGESTER_TARGET} deepflow-ingester
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
 }
 
 install_agent_prebuilt() {
@@ -198,6 +437,7 @@ has_bpf_prebuilt() {
 
 auto_filter_tunnel_peer
 resolve_capture_interface
+resolve_deepflow_relay_config
 
 case "${INSTALL_MODE}" in
   prebuilt)
@@ -256,6 +496,9 @@ AGENT_ENVIRONMENT=${AGENT_ENVIRONMENT}
 EOF
 chmod 0640 /etc/vmlens/agent.env
 
+install_deepflow_relay
+install_deepflow_agent
+
 cat >/etc/systemd/system/vmlens-agent.service <<'EOF'
 [Unit]
 Description=VMLens network relationship agent
@@ -280,6 +523,18 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
+if is_true "${INSTALL_DEEPFLOW_RELAY}"; then
+  systemctl enable vmlens-deepflow-controller-relay
+  systemctl enable vmlens-deepflow-ingester-relay
+  systemctl restart vmlens-deepflow-controller-relay
+  systemctl restart vmlens-deepflow-ingester-relay
+  echo "DeepFlow relays installed; logs: journalctl -u vmlens-deepflow-controller-relay -u vmlens-deepflow-ingester-relay -f"
+fi
+if is_true "${INSTALL_DEEPFLOW_AGENT}"; then
+  systemctl enable deepflow-agent
+  systemctl restart deepflow-agent
+  echo "DeepFlow agent installed; config: /etc/deepflow-agent.yaml; logs: journalctl -u deepflow-agent -f"
+fi
 systemctl enable vmlens-agent
 systemctl restart vmlens-agent
 echo "VMLens agent installed; logs: journalctl -u vmlens-agent -f"

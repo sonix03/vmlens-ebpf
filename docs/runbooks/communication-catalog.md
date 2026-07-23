@@ -9,7 +9,7 @@ VMLens menampilkan satu garis relasi untuk sepasang VM yang sudah terdaftar.
 
 - Garis hijau terang dan bergerak berarti ada aktivitas TCP/UDP terbaru.
 - Selama paket/data berikutnya terus terdeteksi, garis terus bergerak.
-- Setelah tidak ada aktivitas selama `FLOW_ACTIVE_WINDOW` (default `3s`),
+- Setelah tidak ada aktivitas selama `FLOW_ACTIVE_WINDOW` (default `4s`),
   animasi berhenti dan garis menjadi abu-abu redup.
 - Garis redup tetap disimpan sebagai histori relasi dalam jendela graph 24 jam.
 - Event baru pada relasi yang sama langsung mengaktifkan animasinya kembali.
@@ -20,7 +20,7 @@ Window tiga detik membuat request yang sangat singkat tetap terlihat oleh
 manusia. Nilainya dapat diubah melalui `.env`:
 
 ```dotenv
-FLOW_ACTIVE_WINDOW=3s
+FLOW_ACTIVE_WINDOW=4s
 ```
 
 Nilai yang diterima adalah `500ms` sampai `1m`. Setelah mengubahnya, rebuild

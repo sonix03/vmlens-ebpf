@@ -67,6 +67,16 @@ Check health:
 bash scripts/vmlens-stack.sh health
 ```
 
+The start command also creates VMLens-prefixed Grafana dashboards from the
+DeepFlow built-in dashboards:
+
+```text
+VMLens Live - Network Flow Log
+VMLens Live - Request Log
+VMLens Live - Network Cloud Host
+VMLens Live - Application Cloud Host
+```
+
 The integrated stack starts DeepFlow's central services only. It does not
 install DeepFlow agents into cloud VMs. VMLens can still draw realtime topology
 lines from its own TC/eBPF agent, while DeepFlow L4/L7 tables populate after
@@ -91,6 +101,15 @@ Querier API    http://localhost:20416
 Controller API http://localhost:30417
 ClickHouse     http://localhost:8123
 Container      deepflow-clickhouse
+```
+
+Useful Grafana URLs:
+
+```text
+http://localhost:3001/d/VMLens_Network_Flow_Log_Live/vmlens-live-network-flow-log?orgId=1&from=now-1h&to=now&refresh=5s
+http://localhost:3001/d/VMLens_Request_Log_Live/vmlens-live-request-log?orgId=1&from=now-1h&to=now&refresh=5s
+http://localhost:3001/d/VMLens_Network_Cloud_Host_Live/vmlens-live-network-cloud-host?orgId=1&from=now-15m&to=now&refresh=5s
+http://localhost:3001/d/VMLens_Application_Cloud_Host_Live/vmlens-live-application-cloud-host?orgId=1&from=now-15m&to=now&refresh=5s
 ```
 
 If DeepFlow is run outside this repository and ClickHouse is not exposed on `localhost:8123`, either expose it from the
@@ -137,10 +156,17 @@ DEEPFLOW_QUERY_TIMEOUT=5s
 DEEPFLOW_MAX_LIMIT=1000
 DEEPFLOW_MASK_EXTERNAL_IPS=false
 DEEPFLOW_REQUIRE_INVENTORY_FILTER=true
+DEEPFLOW_EXCLUDED_IPS=10.20.20.125,127.0.0.1,127.0.0.53
+DEEPFLOW_EXCLUDED_PORTS=22,53,123,8080,18080,18081,20033,20035,30033,30035
+DEEPFLOW_EXCLUDED_L7_RESOURCE_PREFIXES=/trident.,trident.,/api/agents/,/api/flows/ingest,/health
 ```
 
 `DEEPFLOW_REQUIRE_INVENTORY_FILTER=true` is the safe default. It means VMLens
 only queries and returns rows involving IPs from the VMLens VM inventory.
+
+The default excluded ports and L7 resource prefixes remove VMLens tunnel
+traffic, VMLens agent telemetry, and DeepFlow's own gRPC/control traffic from
+VMLens product views. Raw ClickHouse data remains unchanged.
 
 ## Start VMLens
 
@@ -168,6 +194,34 @@ Expected healthy signals:
   "clickhouse_reachable": true,
   "agent_list_not_empty": true
 }
+```
+
+Check raw log and Cloud Host metric ingestion directly:
+
+```bash
+docker exec vmlens-ebpf-deepflow-clickhouse-1 clickhouse-client \
+  --query "SELECT count(), max(time) FROM flow_log.l4_flow_log WHERE time > now() - INTERVAL 30 MINUTE"
+
+docker exec vmlens-ebpf-deepflow-clickhouse-1 clickhouse-client \
+  --query "SELECT count(), max(time) FROM flow_log.l7_flow_log WHERE time > now() - INTERVAL 30 MINUTE"
+
+docker exec vmlens-ebpf-deepflow-clickhouse-1 clickhouse-client \
+  --query "SELECT count(), max(time) FROM flow_metrics.\`network.1s\` WHERE time > now() - INTERVAL 30 MINUTE"
+
+docker exec vmlens-ebpf-deepflow-clickhouse-1 clickhouse-client \
+  --query "SELECT count(), max(time) FROM flow_metrics.\`application.1s\` WHERE time > now() - INTERVAL 30 MINUTE"
+```
+
+If `flow_log` has rows but Grafana says `No data`, the issue is usually a
+Grafana variable or time range. If `flow_metrics` is empty, Cloud Host panels
+will remain empty even when raw flow logs already have data.
+
+VMLens API endpoints intentionally filter known telemetry/control traffic, so
+these endpoints should show application traffic instead of DeepFlow internal
+paths such as `/trident.Synchronizer/Sync`:
+
+```bash
+curl 'http://127.0.0.1:8080/api/deepflow/raw/flows?time_range=30m&limit=20'
 ```
 
 ## API endpoints

@@ -11,6 +11,8 @@ GRAFANA_TO="${GRAFANA_TO:-now}"
 dashboards=(
   "Network_Flow_Log_Cloud|VMLens_Network_Flow_Log_Live|VMLens Live - Network Flow Log"
   "Application_Request_Log_Cloud|VMLens_Request_Log_Live|VMLens Live - Request Log"
+  "Network_Cloud_Host|VMLens_Network_Cloud_Host_Live|VMLens Live - Network Cloud Host"
+  "Application_Cloud_Host|VMLens_Application_Cloud_Host_Live|VMLens Live - Application Cloud Host"
 )
 
 require() {

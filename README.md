@@ -5,8 +5,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/sonix03/vmlens-ebpf/releases/tag/v2.7">
-    <img alt="Release" src="https://img.shields.io/badge/release-v2.7-3FAB48?style=for-the-badge">
+  <a href="https://github.com/sonix03/vmlens-ebpf/releases/latest">
+    <img alt="Release" src="https://img.shields.io/github/v/release/sonix03/vmlens-ebpf?style=for-the-badge&color=3FAB48">
   </a>
   <img alt="Go" src="https://img.shields.io/badge/Go-1.22-00ADD8?style=for-the-badge&logo=go&logoColor=white">
   <img alt="React" src="https://img.shields.io/badge/React-TypeScript-61DAFB?style=for-the-badge&logo=react&logoColor=111">
@@ -159,6 +159,15 @@ The packaged DeepFlow stack starts the central DeepFlow services. DeepFlow VM
 agents still need to be installed on the VMs you want DeepFlow to observe. The
 VMLens agent remains the realtime source for live topology lines.
 
+On start, VMLens also creates or updates these Grafana dashboards:
+
+```text
+VMLens Live - Network Flow Log
+VMLens Live - Request Log
+VMLens Live - Network Cloud Host
+VMLens Live - Application Cloud Host
+```
+
 Core VMLens only, without DeepFlow:
 
 ```bash
@@ -238,7 +247,7 @@ Run on each cloud VM:
 
 ```bash
 curl -fsSL -o /tmp/vmlens-install-agent.sh \
-  https://github.com/sonix03/vmlens-ebpf/releases/download/v2.7/install-agent.sh
+  https://github.com/sonix03/vmlens-ebpf/releases/latest/download/install-agent.sh
 
 chmod +x /tmp/vmlens-install-agent.sh
 
@@ -249,8 +258,11 @@ sudo env \
   FLOW_INTERVAL=1s \
   CAPTURE_MODE=tc \
   CAPTURE_INTERFACE=ens3 \
-  AGENT_BINARY_URL=https://github.com/sonix03/vmlens-ebpf/releases/download/v2.7/vmlens-agent-linux-amd64 \
-  BPF_OBJECT_URL=https://github.com/sonix03/vmlens-ebpf/releases/download/v2.7/flow_tracker-linux-amd64.bpf.o \
+  AGENT_BINARY_URL=https://github.com/sonix03/vmlens-ebpf/releases/latest/download/vmlens-agent-linux-amd64 \
+  BPF_OBJECT_URL=https://github.com/sonix03/vmlens-ebpf/releases/latest/download/flow_tracker-linux-amd64.bpf.o \
+  INSTALL_DEEPFLOW_AGENT=true \
+  INSTALL_DEEPFLOW_RELAY=true \
+  DEEPFLOW_AGENT_VERSION=v6.6.1 \
   bash /tmp/vmlens-install-agent.sh
 ```
 
@@ -258,8 +270,11 @@ Check:
 
 ```bash
 systemctl is-active vmlens-agent
+systemctl is-active deepflow-agent
 sudo systemctl status vmlens-agent --no-pager
+sudo systemctl status deepflow-agent --no-pager
 sudo journalctl -u vmlens-agent -n 50 --no-pager
+sudo journalctl -u deepflow-agent -n 50 --no-pager
 ```
 
 Expected:
@@ -268,6 +283,7 @@ Expected:
 active
 registered agent=...
 eBPF collector loaded object=/usr/lib/vmlens/flow_tracker.bpf.o mode=tc interface=ens3
+TRACER_RUNNING
 ```
 
 When the install command is run over SSH, the installer automatically adds the
@@ -317,13 +333,32 @@ Local verification:
 curl http://127.0.0.1:8080/api/stats/summary
 curl 'http://127.0.0.1:8080/api/internal/activity?limit=10'
 curl http://127.0.0.1:8080/api/graph
+curl 'http://127.0.0.1:8080/api/deepflow/raw/flows?time_range=30m&limit=10'
+curl http://127.0.0.1:8080/api/deepflow/health
 ```
 
 Expected activity:
 
 ```text
 testing-a-2 (10.20.20.130) -> testing-a-1 (10.20.20.199):8081 tcp
+DeepFlow L4: tcp 10.20.20.130 -> 10.20.20.199:8081
+DeepFlow L7: HTTP GET / response_code=200
 ```
+
+DeepFlow raw logs and Cloud Host metrics normally appear after a short ingest
+delay. For lab testing, wait 8-15 seconds after sending traffic before checking
+Grafana or ClickHouse.
+
+VMLens filters known telemetry/control traffic by default:
+
+```text
+DEEPFLOW_EXCLUDED_PORTS=22,53,123,8080,18080,18081,20033,20035,30033,30035
+DEEPFLOW_EXCLUDED_IPS=10.20.20.125,127.0.0.1,127.0.0.53
+DEEPFLOW_EXCLUDED_L7_RESOURCE_PREFIXES=/trident.,trident.,/api/agents/,/api/flows/ingest,/health
+```
+
+This keeps VMLens request tables focused on application/testing traffic instead
+of VMLens tunnel or DeepFlow agent-to-server traffic.
 
 ## Common operations
 
