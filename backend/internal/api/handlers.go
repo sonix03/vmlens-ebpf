@@ -25,6 +25,22 @@ type Handlers struct {
 	DeepFlow *service.DeepFlowService
 }
 
+func (h *Handlers) Root(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"service":   "vmlens-control-plane",
+		"status":    "ok",
+		"health":    "/health",
+		"dashboard": "http://localhost:3000",
+		"api": []string{
+			"/api/agents",
+			"/api/vms",
+			"/api/graph",
+			"/api/internal/activity",
+			"/api/deepflow/health",
+		},
+	})
+}
+
 func (h *Handlers) Health(w http.ResponseWriter, r *http.Request) {
 	if err := h.Pool.Ping(r.Context()); err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database unavailable")

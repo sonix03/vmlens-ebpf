@@ -8,6 +8,7 @@ import (
 
 func Routes(handlers *Handlers, hub *realtime.Hub, allowedOrigins []string) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /", handlers.Root)
 	mux.HandleFunc("GET /health", handlers.Health)
 	mux.HandleFunc("POST /api/agents/register", handlers.RegisterAgent)
 	mux.HandleFunc("POST /api/agents/heartbeat", handlers.Heartbeat)
