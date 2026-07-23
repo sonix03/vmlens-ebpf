@@ -14,13 +14,16 @@ import (
 )
 
 type QueryFilter struct {
-	Window     time.Duration
-	Limit      int
-	AllowedIPs []string
+	Window                     time.Duration
+	Limit                      int
+	AllowedIPs                 []string
+	ExcludedIPs                []string
+	ExcludedPorts              []int
+	ExcludedL7ResourcePrefixes []string
 }
 
 func (c *Client) QueryL4Flows(ctx context.Context, filter QueryFilter) ([]model.DeepFlowL4Flow, error) {
-	where := deepFlowWhere(filter)
+	where := deepFlowL4Where(filter)
 	sql := fmt.Sprintf(`
 SELECT
   time,
@@ -57,7 +60,7 @@ LIMIT %d`, where, safeLimit(filter.Limit, c.cfg.MaxLimit))
 }
 
 func (c *Client) QueryL7Requests(ctx context.Context, filter QueryFilter) ([]model.DeepFlowL7Request, error) {
-	where := deepFlowWhere(filter)
+	where := deepFlowL7Where(filter)
 	sql := fmt.Sprintf(`
 SELECT
   time,
@@ -347,7 +350,26 @@ func parseDeepFlowTime(raw string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("parse deepflow time %q", raw)
 }
 
-func deepFlowWhere(filter QueryFilter) string {
+func deepFlowL4Where(filter QueryFilter) string {
+	conditions := deepFlowBaseConditions(filter)
+	excludedPorts := ints(filter.ExcludedPorts)
+	if len(excludedPorts) > 0 {
+		list := strings.Join(excludedPorts, ",")
+		conditions = append(conditions, fmt.Sprintf("client_port NOT IN (%s)", list))
+		conditions = append(conditions, fmt.Sprintf("server_port NOT IN (%s)", list))
+	}
+	return strings.Join(conditions, " AND ")
+}
+
+func deepFlowL7Where(filter QueryFilter) string {
+	conditions := deepFlowBaseConditions(filter)
+	for _, prefix := range quoteStrings(filter.ExcludedL7ResourcePrefixes) {
+		conditions = append(conditions, fmt.Sprintf("NOT startsWith(request_resource, %s)", prefix))
+	}
+	return strings.Join(conditions, " AND ")
+}
+
+func deepFlowBaseConditions(filter QueryFilter) []string {
 	window := int(filter.Window.Seconds())
 	if window <= 0 {
 		window = int((30 * time.Minute).Seconds())
@@ -357,7 +379,12 @@ func deepFlowWhere(filter QueryFilter) string {
 	if len(allowed) > 0 {
 		conditions = append(conditions, fmt.Sprintf("(toString(ip4_0) IN (%s) OR toString(ip4_1) IN (%s))", strings.Join(allowed, ","), strings.Join(allowed, ",")))
 	}
-	return strings.Join(conditions, " AND ")
+	excluded := quoteStrings(filter.ExcludedIPs)
+	if len(excluded) > 0 {
+		conditions = append(conditions, fmt.Sprintf("toString(ip4_0) NOT IN (%s)", strings.Join(excluded, ",")))
+		conditions = append(conditions, fmt.Sprintf("toString(ip4_1) NOT IN (%s)", strings.Join(excluded, ",")))
+	}
+	return conditions
 }
 
 func quoteStrings(values []string) []string {
@@ -375,6 +402,26 @@ func quoteStrings(values []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func ints(values []int) []string {
+	set := map[int]struct{}{}
+	for _, value := range values {
+		if value < 1 || value > 65535 {
+			continue
+		}
+		set[value] = struct{}{}
+	}
+	out := make([]int, 0, len(set))
+	for value := range set {
+		out = append(out, value)
+	}
+	sort.Ints(out)
+	encoded := make([]string, 0, len(out))
+	for _, value := range out {
+		encoded = append(encoded, strconv.Itoa(value))
+	}
+	return encoded
 }
 
 func safeLimit(value, max int) int {

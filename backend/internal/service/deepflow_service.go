@@ -46,7 +46,7 @@ func (s *DeepFlowService) Topology(ctx context.Context, request DeepFlowRequest)
 			Window: window, MaskExternalIPs: mask, TenantID: request.TenantID, ProjectID: request.ProjectID, VMID: request.VMID,
 		}), nil
 	}
-	filter := deepflow.QueryFilter{Window: window, Limit: limit, AllowedIPs: allowedIPs}
+	filter := s.queryFilter(window, limit, allowedIPs)
 	l4Rows, l4Err := s.client.QueryL4Flows(ctx, filter)
 	l7Rows, l7Err := s.client.QueryL7Requests(ctx, filter)
 	mappings, mappingErr := s.client.QueryAgentMappings(ctx)
@@ -70,7 +70,7 @@ func (s *DeepFlowService) Topology(ctx context.Context, request DeepFlowRequest)
 
 func (s *DeepFlowService) RawLogs(ctx context.Context, request DeepFlowRequest) (model.DeepFlowRawLogs, error) {
 	if !s.cfg.Enabled {
-		return model.DeepFlowRawLogs{Window: s.window(request.Window).String(), Limit: s.limit(request.Limit)}, nil
+		return emptyRawLogs(s.window(request.Window), s.limit(request.Limit)), nil
 	}
 	window := s.window(request.Window)
 	limit := s.limit(request.Limit)
@@ -80,9 +80,9 @@ func (s *DeepFlowService) RawLogs(ctx context.Context, request DeepFlowRequest) 
 	}
 	allowedIPs := deepflow.InventoryIPs(vms, request.TenantID, request.ProjectID, request.VMID)
 	if s.cfg.RequireInventoryFilter && len(allowedIPs) == 0 {
-		return model.DeepFlowRawLogs{Window: window.String(), Limit: limit}, nil
+		return emptyRawLogs(window, limit), nil
 	}
-	filter := deepflow.QueryFilter{Window: window, Limit: limit, AllowedIPs: allowedIPs}
+	filter := s.queryFilter(window, limit, allowedIPs)
 	l4Rows, l4Err := s.client.QueryL4Flows(ctx, filter)
 	l7Rows, l7Err := s.client.QueryL7Requests(ctx, filter)
 	mappings, mappingErr := s.client.QueryAgentMappings(ctx)
@@ -97,7 +97,33 @@ func (s *DeepFlowService) RawLogs(ctx context.Context, request DeepFlowRequest) 
 		mappings = nil
 		warnings = append(warnings, "agent mapping query failed: "+mappingErr.Error())
 	}
+	if l4Rows == nil {
+		l4Rows = []model.DeepFlowL4Flow{}
+	}
+	if l7Rows == nil {
+		l7Rows = []model.DeepFlowL7Request{}
+	}
 	return model.DeepFlowRawLogs{L4: l4Rows, L7: l7Rows, Mappings: mappings, Window: window.String(), Limit: limit, Warnings: warnings}, nil
+}
+
+func (s *DeepFlowService) queryFilter(window time.Duration, limit int, allowedIPs []string) deepflow.QueryFilter {
+	return deepflow.QueryFilter{
+		Window:                     window,
+		Limit:                      limit,
+		AllowedIPs:                 allowedIPs,
+		ExcludedIPs:                s.cfg.ExcludedIPs,
+		ExcludedPorts:              s.cfg.ExcludedPorts,
+		ExcludedL7ResourcePrefixes: s.cfg.ExcludedL7ResourcePrefixes,
+	}
+}
+
+func emptyRawLogs(window time.Duration, limit int) model.DeepFlowRawLogs {
+	return model.DeepFlowRawLogs{
+		L4:     []model.DeepFlowL4Flow{},
+		L7:     []model.DeepFlowL7Request{},
+		Window: window.String(),
+		Limit:  limit,
+	}
 }
 
 func (s *DeepFlowService) Health(ctx context.Context, request DeepFlowRequest) model.DeepFlowHealth {
