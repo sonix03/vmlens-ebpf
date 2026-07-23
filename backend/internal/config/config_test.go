@@ -68,3 +68,22 @@ func TestUnregisteredInternalScopeRejectsInvalidValue(t *testing.T) {
 		t.Fatal("expected validation error")
 	}
 }
+
+func TestGraphDefaultsShowIdleConnectionsAndHideTelemetryNoise(t *testing.T) {
+	t.Setenv("GRAPH_INCLUDE_IDLE", "")
+	t.Setenv("GRAPH_EXCLUDED_PORTS", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Graph.IncludeIdle {
+		t.Fatal("default graph should keep idle connection lines visible")
+	}
+	wantPorts := map[int]bool{22: true, 53: true, 123: true, 8080: true, 18080: true, 30033: true, 30035: true}
+	for _, port := range cfg.Graph.ExcludedPorts {
+		delete(wantPorts, port)
+	}
+	if len(wantPorts) != 0 {
+		t.Fatalf("missing default graph excluded ports: %#v", wantPorts)
+	}
+}

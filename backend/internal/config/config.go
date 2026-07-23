@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,22 +17,33 @@ type Config struct {
 	FlowActiveWindow          time.Duration
 	StatusSweepPeriod         time.Duration
 	VMDeleteAfter             time.Duration
+	Graph                     GraphConfig
 	DeepFlow                  DeepFlowConfig
 }
 
+type GraphConfig struct {
+	ExcludedPorts []int
+	AllowedPorts  []int
+	ExcludedIPs   []string
+	IncludeIdle   bool
+}
+
 type DeepFlowConfig struct {
-	Enabled                bool
-	ClickHouseURL          string
-	ClickHouseDatabase     string
-	ClickHouseUsername     string
-	ClickHousePassword     string
-	QuerierURL             string
-	ControllerURL          string
-	QueryTimeout           time.Duration
-	DefaultWindow          time.Duration
-	MaxLimit               int
-	MaskExternalIPs        bool
-	RequireInventoryFilter bool
+	Enabled                    bool
+	ClickHouseURL              string
+	ClickHouseDatabase         string
+	ClickHouseUsername         string
+	ClickHousePassword         string
+	QuerierURL                 string
+	ControllerURL              string
+	QueryTimeout               time.Duration
+	DefaultWindow              time.Duration
+	MaxLimit                   int
+	MaskExternalIPs            bool
+	RequireInventoryFilter     bool
+	ExcludedIPs                []string
+	ExcludedPorts              []int
+	ExcludedL7ResourcePrefixes []string
 }
 
 func Load() (Config, error) {
@@ -41,22 +53,31 @@ func Load() (Config, error) {
 		InternalCIDRs:             csv(env("INTERNAL_CIDRS", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,fc00::/7,fe80::/10,::1/128")),
 		UnregisteredInternalScope: env("UNREGISTERED_INTERNAL_SCOPE", "external_private"),
 		AllowedOrigins:            csv(env("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")),
-		FlowActiveWindow:          3 * time.Second,
+		FlowActiveWindow:          4 * time.Second,
 		StatusSweepPeriod:         30 * time.Second,
 		VMDeleteAfter:             0,
+		Graph: GraphConfig{
+			ExcludedPorts: intCSV(env("GRAPH_EXCLUDED_PORTS", "22,53,123,8080,18080,18081,20033,20035,30033,30035")),
+			AllowedPorts:  intCSV(env("GRAPH_ALLOWED_PORTS", "")),
+			ExcludedIPs:   csv(env("GRAPH_EXCLUDED_IPS", "10.20.20.125,127.0.0.1")),
+			IncludeIdle:   envBool("GRAPH_INCLUDE_IDLE", true),
+		},
 		DeepFlow: DeepFlowConfig{
-			Enabled:                envBool("DEEPFLOW_ENABLED", true),
-			ClickHouseURL:          env("DEEPFLOW_CLICKHOUSE_URL", "http://host.docker.internal:8123"),
-			ClickHouseDatabase:     env("DEEPFLOW_CLICKHOUSE_DATABASE", "default"),
-			ClickHouseUsername:     env("DEEPFLOW_CLICKHOUSE_USERNAME", "default"),
-			ClickHousePassword:     os.Getenv("DEEPFLOW_CLICKHOUSE_PASSWORD"),
-			QuerierURL:             env("DEEPFLOW_QUERIER_URL", "http://host.docker.internal:20416"),
-			ControllerURL:          env("DEEPFLOW_CONTROLLER_URL", "http://host.docker.internal:30417"),
-			QueryTimeout:           5 * time.Second,
-			DefaultWindow:          30 * time.Minute,
-			MaxLimit:               1000,
-			MaskExternalIPs:        envBool("DEEPFLOW_MASK_EXTERNAL_IPS", false),
-			RequireInventoryFilter: envBool("DEEPFLOW_REQUIRE_INVENTORY_FILTER", true),
+			Enabled:                    envBool("DEEPFLOW_ENABLED", true),
+			ClickHouseURL:              env("DEEPFLOW_CLICKHOUSE_URL", "http://host.docker.internal:8123"),
+			ClickHouseDatabase:         env("DEEPFLOW_CLICKHOUSE_DATABASE", "default"),
+			ClickHouseUsername:         env("DEEPFLOW_CLICKHOUSE_USERNAME", "default"),
+			ClickHousePassword:         os.Getenv("DEEPFLOW_CLICKHOUSE_PASSWORD"),
+			QuerierURL:                 env("DEEPFLOW_QUERIER_URL", "http://host.docker.internal:20416"),
+			ControllerURL:              env("DEEPFLOW_CONTROLLER_URL", "http://host.docker.internal:30417"),
+			QueryTimeout:               5 * time.Second,
+			DefaultWindow:              30 * time.Minute,
+			MaxLimit:                   1000,
+			MaskExternalIPs:            envBool("DEEPFLOW_MASK_EXTERNAL_IPS", false),
+			RequireInventoryFilter:     envBool("DEEPFLOW_REQUIRE_INVENTORY_FILTER", true),
+			ExcludedIPs:                csv(env("DEEPFLOW_EXCLUDED_IPS", "10.20.20.125,127.0.0.1,127.0.0.53")),
+			ExcludedPorts:              intCSV(env("DEEPFLOW_EXCLUDED_PORTS", "22,53,123,8080,18080,18081,20033,20035,30033,30035")),
+			ExcludedL7ResourcePrefixes: csv(env("DEEPFLOW_EXCLUDED_L7_RESOURCE_PREFIXES", "/trident.,trident.,/api/agents/,/api/flows/ingest,/health")),
 		},
 	}
 	if raw := os.Getenv("FLOW_ACTIVE_WINDOW"); raw != "" {
@@ -127,6 +148,16 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("DEEPFLOW_MAX_LIMIT must be between 1 and 10000")
 		}
 	}
+	for _, port := range append(cfg.Graph.ExcludedPorts, cfg.Graph.AllowedPorts...) {
+		if port < 1 || port > 65535 {
+			return Config{}, fmt.Errorf("graph ports must be between 1 and 65535")
+		}
+	}
+	for _, port := range cfg.DeepFlow.ExcludedPorts {
+		if port < 1 || port > 65535 {
+			return Config{}, fmt.Errorf("DEEPFLOW_EXCLUDED_PORTS values must be between 1 and 65535")
+		}
+	}
 	return cfg, nil
 }
 
@@ -144,6 +175,23 @@ func csv(raw string) []string {
 		if value := strings.TrimSpace(part); value != "" {
 			out = append(out, value)
 		}
+	}
+	return out
+}
+
+func intCSV(raw string) []int {
+	parts := strings.Split(raw, ",")
+	out := make([]int, 0, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value == "" {
+			continue
+		}
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			continue
+		}
+		out = append(out, parsed)
 	}
 	return out
 }
