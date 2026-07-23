@@ -19,10 +19,11 @@ type FlowService struct {
 	pool       *pgxpool.Pool
 	classifier *Classifier
 	hub        *realtime.Hub
+	visibility GraphVisibility
 }
 
-func NewFlowService(pool *pgxpool.Pool, classifier *Classifier, hub *realtime.Hub) *FlowService {
-	return &FlowService{pool: pool, classifier: classifier, hub: hub}
+func NewFlowService(pool *pgxpool.Pool, classifier *Classifier, hub *realtime.Hub, visibility GraphVisibility) *FlowService {
+	return &FlowService{pool: pool, classifier: classifier, hub: hub, visibility: visibility}
 }
 
 func (s *FlowService) Ingest(ctx context.Context, event model.FlowEvent) (model.Flow, error) {
@@ -237,13 +238,21 @@ func (s *FlowService) ListInternalActivity(ctx context.Context, limit int, windo
 			return nil, err
 		}
 		activity.Service, activity.ServicePort = classifyService(activity.Protocol, activity.Direction, activity.LocalPort, activity.PeerPort)
+		if activity.ObserverIP == activity.PeerIP || (activity.ObserverVMID != "" && activity.ObserverVMID == activity.PeerVMID) {
+			continue
+		}
+		if hiddenByGraphVisibility(s.visibility, activity.LocalPort, activity.PeerPort, activity.ObserverIP, activity.PeerIP) ||
+			hiddenByServicePort(s.visibility, activity.ServicePort) {
+			continue
+		}
 		activity.RequestsPerSec = ratePerSecond(activity.RequestCount, activity.FirstSeen, activity.LastSeen)
 		activity.ConnectionsPerSec = ratePerSecond(activity.ConnectionCount, activity.FirstSeen, activity.LastSeen)
 		activity.ObserverName = valueOr(activity.ObserverName, activity.ObserverIP)
 		activity.PeerName = valueOr(activity.PeerName, activity.PeerIP)
-		if activity.Direction == "ingress" {
+		if shouldFlipServiceResponse(activity.LocalPort, activity.PeerPort) {
 			activity.SourceVMID, activity.SourceName, activity.SourceIP = activity.PeerVMID, activity.PeerName, activity.PeerIP
 			activity.DestinationVMID, activity.DestinationName, activity.DestinationIP = activity.ObserverVMID, activity.ObserverName, activity.ObserverIP
+			activity.BytesSent, activity.BytesReceived = activity.BytesReceived, activity.BytesSent
 		} else {
 			activity.SourceVMID, activity.SourceName, activity.SourceIP = activity.ObserverVMID, activity.ObserverName, activity.ObserverIP
 			activity.DestinationVMID, activity.DestinationName, activity.DestinationIP = activity.PeerVMID, activity.PeerName, activity.PeerIP

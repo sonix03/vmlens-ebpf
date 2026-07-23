@@ -15,10 +15,18 @@ type GraphService struct {
 	pool             *pgxpool.Pool
 	vmService        *VMService
 	flowActiveWindow time.Duration
+	visibility       GraphVisibility
 }
 
-func NewGraphService(pool *pgxpool.Pool, vmService *VMService, flowActiveWindow time.Duration) *GraphService {
-	return &GraphService{pool: pool, vmService: vmService, flowActiveWindow: flowActiveWindow}
+type GraphVisibility struct {
+	ExcludedPorts []int
+	AllowedPorts  []int
+	ExcludedIPs   []string
+	IncludeIdle   bool
+}
+
+func NewGraphService(pool *pgxpool.Pool, vmService *VMService, flowActiveWindow time.Duration, visibility GraphVisibility) *GraphService {
+	return &GraphService{pool: pool, vmService: vmService, flowActiveWindow: flowActiveWindow, visibility: visibility}
 }
 
 type graphFlowRow struct {
@@ -27,8 +35,10 @@ type graphFlowRow struct {
 	DstVMID       string
 	SrcIP         string
 	DstIP         string
+	SrcPort       int
 	DstPort       int
 	Protocol      string
+	Direction     string
 	Scope         string
 	BytesSent     int64
 	BytesReceived int64
@@ -58,7 +68,7 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 	}
 	query := `
 		SELECT COALESCE(f.agent_id, ''), COALESCE(f.src_vm_id, ''), COALESCE(f.dst_vm_id, ''),
-		       host(f.src_ip), host(f.dst_ip), COALESCE(f.dst_port, 0), f.protocol, f.scope,
+		       host(f.src_ip), host(f.dst_ip), COALESCE(f.src_port, 0), COALESCE(f.dst_port, 0), f.protocol, f.direction, f.scope,
 		       f.bytes_sent, f.bytes_received, f.packets, f.connection_count, f.request_count, f.first_seen, f.last_seen, f.observed_at,
 		       COALESCE(sv.name, ''), COALESCE(sv.tenant_id, ''), COALESCE(host(sv.private_ip), ''),
 		       COALESCE(sv.status, ''), COALESCE(sv.role, ''), COALESCE(sv.agent_id, ''),
@@ -109,8 +119,8 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 	for rows.Next() {
 		var row graphFlowRow
 		if err := rows.Scan(
-			&row.AgentID, &row.SrcVMID, &row.DstVMID, &row.SrcIP, &row.DstIP,
-			&row.DstPort, &row.Protocol, &row.Scope, &row.BytesSent, &row.BytesReceived,
+			&row.AgentID, &row.SrcVMID, &row.DstVMID, &row.SrcIP, &row.DstIP, &row.SrcPort,
+			&row.DstPort, &row.Protocol, &row.Direction, &row.Scope, &row.BytesSent, &row.BytesReceived,
 			&row.Packets, &row.Connections, &row.Requests, &row.FirstSeen, &row.LastSeen, &row.ObservedAt,
 			&row.SrcName, &row.SrcTenant, &row.SrcPrivateIP, &row.SrcStatus, &row.SrcRole, &row.SrcAgentID,
 			&row.DstName, &row.DstTenant, &row.DstPrivateIP, &row.DstStatus, &row.DstRole, &row.DstAgentID,
@@ -150,6 +160,13 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 	}
 
 	for _, row := range flowRows {
+		row = normalizeGraphRow(row)
+		if s.hideFlow(row) {
+			continue
+		}
+		if row.SrcIP == row.DstIP || (row.SrcVMID != "" && row.SrcVMID == row.DstVMID) {
+			continue
+		}
 		// A historical flow must not resurrect a registered VM that is absent
 		// from the live/default node set (offline, stale, or filtered out).
 		if _, registered := vmByID[row.SrcVMID]; registered {
@@ -229,16 +246,46 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 	}
 
 	result := model.Graph{Nodes: make([]model.GraphNode, 0, len(nodes)), Edges: make([]model.GraphEdge, 0, len(edges))}
-	for _, node := range nodes {
-		result.Nodes = append(result.Nodes, *node)
-	}
+	connectedNonVMNodes := map[string]bool{}
 	for _, edge := range edges {
 		setEdgeActivity(edge, now, edge.LastObservedAt, s.flowActiveWindow)
+		if !s.visibility.IncludeIdle && !edge.Active {
+			continue
+		}
+		connectedNonVMNodes[edge.Source] = true
+		connectedNonVMNodes[edge.Target] = true
 		result.Edges = append(result.Edges, *edge)
+	}
+	for _, node := range nodes {
+		if node.Type != "vm" && !connectedNonVMNodes[node.ID] {
+			continue
+		}
+		result.Nodes = append(result.Nodes, *node)
 	}
 	sort.Slice(result.Nodes, func(i, j int) bool { return result.Nodes[i].ID < result.Nodes[j].ID })
 	sort.Slice(result.Edges, func(i, j int) bool { return result.Edges[i].ID < result.Edges[j].ID })
 	return result, nil
+}
+
+func (s *GraphService) hideFlow(row graphFlowRow) bool {
+	return hiddenByGraphVisibility(s.visibility, row.SrcPort, row.DstPort, row.SrcIP, row.DstIP)
+}
+
+func normalizeGraphRow(row graphFlowRow) graphFlowRow {
+	if !shouldFlipServiceResponse(row.SrcPort, row.DstPort) {
+		return row
+	}
+	row.SrcVMID, row.DstVMID = row.DstVMID, row.SrcVMID
+	row.SrcIP, row.DstIP = row.DstIP, row.SrcIP
+	row.SrcPort, row.DstPort = row.DstPort, row.SrcPort
+	row.SrcName, row.DstName = row.DstName, row.SrcName
+	row.SrcTenant, row.DstTenant = row.DstTenant, row.SrcTenant
+	row.SrcPrivateIP, row.DstPrivateIP = row.DstPrivateIP, row.SrcPrivateIP
+	row.SrcStatus, row.DstStatus = row.DstStatus, row.SrcStatus
+	row.SrcRole, row.DstRole = row.DstRole, row.SrcRole
+	row.SrcAgentID, row.DstAgentID = row.DstAgentID, row.SrcAgentID
+	row.BytesSent, row.BytesReceived = row.BytesReceived, row.BytesSent
+	return row
 }
 
 func graphEdgeID(sourceID, targetID, protocol, scope string) string {

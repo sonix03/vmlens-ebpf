@@ -43,8 +43,14 @@ func run() error {
 	hub := realtime.New()
 	agents := service.NewAgentService(pool, hub)
 	vms := service.NewVMService(pool)
-	flows := service.NewFlowService(pool, classifier, hub)
-	graph := service.NewGraphService(pool, vms, cfg.FlowActiveWindow)
+	graphVisibility := service.GraphVisibility{
+		ExcludedPorts: cfg.Graph.ExcludedPorts,
+		AllowedPorts:  cfg.Graph.AllowedPorts,
+		ExcludedIPs:   cfg.Graph.ExcludedIPs,
+		IncludeIdle:   cfg.Graph.IncludeIdle,
+	}
+	flows := service.NewFlowService(pool, classifier, hub, graphVisibility)
+	graph := service.NewGraphService(pool, vms, cfg.FlowActiveWindow, graphVisibility)
 	stats := service.NewStatsService(pool)
 	deepFlow := service.NewDeepFlowService(cfg.DeepFlow, vms)
 	handlers := &apihttp.Handlers{Pool: pool, Agents: agents, VMs: vms, Flows: flows, Graph: graph, Stats: stats, DeepFlow: deepFlow}
