@@ -22,6 +22,10 @@ const minCanvasWidth = 3200
 const minCanvasHeight = 2000
 const minZoom = 0.15
 const maxZoom = 2.5
+const requestAnimationWindowMs = 4000
+const tcpConnectionWindowMs = 60_000
+const datagramConnectionWindowMs = 12_000
+const edgePulseWindowMs = 900
 
 type Point = { x: number; y: number }
 type Viewport = Point & { zoom: number }
@@ -34,6 +38,10 @@ type VisualRelationship = {
   hasReverse: boolean
   hasTraffic: boolean
   hasReachability: boolean
+  connectionForwardUntil: number
+  connectionReverseUntil: number
+  pulseForwardUntil: number
+  pulseReverseUntil: number
   activeForwardUntil: number
   activeReverseUntil: number
   weight: number
@@ -41,6 +49,7 @@ type VisualRelationship = {
   requestCount: number
   errorCount: number
   avgRTTMs: number
+  protocols: Set<string>
 }
 
 function clampZoom(zoom: number) {
@@ -74,7 +83,24 @@ function edgePoint(from: Point, to: Point) {
 function activeUntil(edge: GraphEdge) {
   const parsedActiveUntil = Date.parse(edge.active_until)
   if (Number.isFinite(parsedActiveUntil)) return parsedActiveUntil
-  return edge.active ? Date.parse(edge.last_observed_at) + 3000 : 0
+  return edge.active ? Date.parse(edge.last_observed_at) + requestAnimationWindowMs : 0
+}
+
+function connectionUntil(edge: GraphEdge) {
+  const observedAt = Date.parse(edge.last_observed_at || edge.last_seen)
+  if (!Number.isFinite(observedAt)) return 0
+  const windowMs = edge.protocol === 'tcp' ? tcpConnectionWindowMs : datagramConnectionWindowMs
+  return observedAt + windowMs
+}
+
+function pulseUntil(edge: GraphEdge) {
+  const observedAt = Date.parse(edge.last_observed_at || edge.last_seen)
+  if (!Number.isFinite(observedAt)) return 0
+  return observedAt + edgePulseWindowMs
+}
+
+function isRequestEdge(edge: GraphEdge) {
+  return (edge.request_count ?? 0) > 0 && edge.kind !== 'reachability' && edge.protocol !== 'icmp'
 }
 
 function isLikelyEphemeralPort(port: number) {
@@ -275,6 +301,10 @@ export function GraphView({ graph, onNodeSelect }: Props) {
         hasReverse: false,
         hasTraffic: false,
         hasReachability: false,
+        connectionForwardUntil: 0,
+        connectionReverseUntil: 0,
+        pulseForwardUntil: 0,
+        pulseReverseUntil: 0,
         activeForwardUntil: 0,
         activeReverseUntil: 0,
         weight: 1,
@@ -282,16 +312,27 @@ export function GraphView({ graph, onNodeSelect }: Props) {
         requestCount: 0,
         errorCount: 0,
         avgRTTMs: 0,
+        protocols: new Set<string>(),
       }
       const isReachability = edge.kind === 'reachability' || edge.reachable === true || edge.protocol === 'icmp'
-      const until = isReachability ? 0 : activeUntil(edge)
+      const animates = isRequestEdge(edge)
+      const until = isReachability || !animates ? 0 : activeUntil(edge)
+      const connectedUntil = Math.max(connectionUntil(edge), until)
+      const freshUntil = pulseUntil(edge)
       current.hasTraffic = current.hasTraffic || !isReachability
       current.hasReachability = current.hasReachability || isReachability
+      if (edge.protocol) {
+        current.protocols.add(edge.protocol)
+      }
       if (directionKey === forwardKey) {
         current.hasForward = true
+        current.connectionForwardUntil = Math.max(current.connectionForwardUntil, connectedUntil)
+        current.pulseForwardUntil = Math.max(current.pulseForwardUntil, freshUntil)
         current.activeForwardUntil = Math.max(current.activeForwardUntil, until)
       } else {
         current.hasReverse = true
+        current.connectionReverseUntil = Math.max(current.connectionReverseUntil, connectedUntil)
+        current.pulseReverseUntil = Math.max(current.pulseReverseUntil, freshUntil)
         current.activeReverseUntil = Math.max(current.activeReverseUntil, until)
       }
       if (!isReachability) {
@@ -311,27 +352,37 @@ export function GraphView({ graph, onNodeSelect }: Props) {
       const activeForward = relationship.activeForwardUntil > clock
       const activeReverse = relationship.activeReverseUntil > clock
       const active = activeForward || activeReverse
+      const connectionForward = relationship.connectionForwardUntil > clock
+      const connectionReverse = relationship.connectionReverseUntil > clock
+      const connected = connectionForward || connectionReverse || active
+      const fresh = relationship.pulseForwardUntil > clock || relationship.pulseReverseUntil > clock
       const reachabilityOnly = relationship.hasReachability && !relationship.hasTraffic
       const start = edgePoint(source.center, target.center)
       const end = edgePoint(target.center, source.center)
+      const protocolLabel = Array.from(relationship.protocols).filter(Boolean).sort().join('/')
       const label = reachabilityOnly
-        ? ['reachable', relationship.hasForward && relationship.hasReverse ? '2-way' : '', relationship.avgRTTMs ? `${relationship.avgRTTMs.toFixed(1)}ms` : ''].filter(Boolean).join(' · ')
+        ? ['connected', protocolLabel, relationship.hasForward && relationship.hasReverse ? '2-way' : '', relationship.avgRTTMs ? `${relationship.avgRTTMs.toFixed(1)}ms` : ''].filter(Boolean).join(' · ')
         : [
           formatCompactBytes(relationship.totalBytes),
           relationship.requestCount ? `${relationship.requestCount} req` : '',
+          protocolLabel,
           relationship.hasForward && relationship.hasReverse ? '2-way' : '',
-          relationship.hasReachability ? 'reachable' : '',
           relationship.avgRTTMs ? `${relationship.avgRTTMs.toFixed(1)}ms` : '',
           relationship.errorCount ? `${relationship.errorCount} err` : '',
         ].filter(Boolean).join(' · ')
       return {
         id,
         active,
+        connected,
+        fresh,
+        hasTraffic: relationship.hasTraffic,
         reachabilityOnly,
         activeForward,
         activeReverse,
-        hasForward: relationship.hasForward,
-        hasReverse: relationship.hasReverse,
+        connectionForward,
+        connectionReverse,
+        hasForward: connected ? relationship.hasForward : false,
+        hasReverse: connected ? relationship.hasReverse : false,
         width: Math.min(4, 1.25 + relationship.weight * 0.4),
         path: curvedPath(start, end),
         label,
@@ -371,20 +422,20 @@ export function GraphView({ graph, onNodeSelect }: Props) {
             <path d="M 1 1 L 9 5 L 1 9 z" fill="#6fa88b" />
           </marker>
           <marker id="edge-arrow-idle" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
-            <path d="M 1 1 L 9 5 L 1 9 z" fill="#4a515a" />
+            <path d="M 1 1 L 9 5 L 1 9 z" fill="#5fae7e" />
           </marker>
           <marker id="edge-arrow-reachability" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
             <path d="M 1 1 L 9 5 L 1 9 z" fill="#79add1" />
           </marker>
         </defs>
-        {edges.map((edge) => <path
+        {edges.map((edge) => edge.connected ? <path
           key={edge.id}
-          className={`graph-edge graph-edge-connection ${edge.reachabilityOnly ? 'graph-edge-reachability' : 'graph-edge-idle'}`}
+          className={`graph-edge graph-edge-connection graph-edge-idle${edge.fresh ? ' graph-edge-pulse' : ''}`}
           d={edge.path}
-          markerStart={edge.hasReverse ? `url(#${edge.reachabilityOnly ? 'edge-arrow-reachability' : 'edge-arrow-idle'})` : undefined}
-          markerEnd={edge.hasForward ? `url(#${edge.reachabilityOnly ? 'edge-arrow-reachability' : 'edge-arrow-idle'})` : undefined}
-          style={{ strokeWidth: edge.reachabilityOnly ? 1.25 : edge.active ? Math.max(1.25, edge.width * 0.75) : 1.15, opacity: edge.reachabilityOnly ? 0.72 : edge.active ? 0.55 : 0.36 }}
-        />)}
+          markerStart={edge.connectionReverse ? 'url(#edge-arrow-idle)' : undefined}
+          markerEnd={edge.connectionForward ? 'url(#edge-arrow-idle)' : undefined}
+          style={{ strokeWidth: edge.active ? Math.max(1.25, edge.width * 0.75) : 1.35, opacity: edge.active ? 0.58 : 0.72 }}
+        /> : null)}
         {edges.map((edge) => edge.activeForward ? <path
           key={`${edge.id}-forward-active`}
           className="graph-edge graph-edge-active graph-edge-forward"
@@ -399,7 +450,7 @@ export function GraphView({ graph, onNodeSelect }: Props) {
           markerStart="url(#edge-arrow-active)"
           style={{ strokeWidth: edge.width }}
         /> : null)}
-        {edges.map((edge) => edge.label ? <text
+        {edges.map((edge) => edge.connected && edge.label ? <text
           key={`${edge.id}-label`}
           className="graph-edge-label"
           x={edge.labelX}
