@@ -10,6 +10,8 @@ export const API_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? 
 export const GRAFANA_URL = ((import.meta.env.VITE_GRAFANA_URL as string | undefined) ?? 'http://localhost:3001').replace(/\/$/, '')
 export const GRAFANA_L4_URL = `${GRAFANA_URL}/d/VMLens_Network_Flow_Log_Live/vmlens-live-network-flow-log?orgId=1&from=now-1h&to=now&refresh=5s`
 export const GRAFANA_L7_URL = `${GRAFANA_URL}/d/VMLens_Request_Log_Live/vmlens-live-request-log?orgId=1&from=now-1h&to=now&refresh=5s`
+export const GRAFANA_NETWORK_HOST_URL = `${GRAFANA_URL}/d/VMLens_Network_Cloud_Host_Live/vmlens-live-network-cloud-host?orgId=1&from=now-15m&to=now&refresh=5s`
+export const GRAFANA_APPLICATION_HOST_URL = `${GRAFANA_URL}/d/VMLens_Application_Cloud_Host_Live/vmlens-live-application-cloud-host?orgId=1&from=now-15m&to=now&refresh=5s`
 
 async function get<T>(path: string): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, { cache: 'no-store' })

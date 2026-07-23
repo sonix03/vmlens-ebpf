@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, GRAFANA_L4_URL, GRAFANA_L7_URL } from './api/client'
+import { api, GRAFANA_APPLICATION_HOST_URL, GRAFANA_L4_URL, GRAFANA_L7_URL, GRAFANA_NETWORK_HOST_URL } from './api/client'
 import { connectRealtime } from './api/realtime'
 import { DeepFlowFlowTable, type DeepFlowTableMode } from './components/DeepFlowFlowTable'
 import { GraphView } from './components/GraphView'
@@ -12,6 +12,7 @@ import type { GraphData, GraphEdge, GraphFilters, GraphNode } from './types/grap
 import type { InternalActivity } from './types/internalActivity'
 import type { Summary } from './types/stats'
 import type { VM } from './types/vm'
+import { isDeepFlowConnectionFlow, isDeepFlowRequestFlow } from './utils/flowFilters'
 
 const graphWindow: GraphFilters = {
   vm_id: '', scope: '', protocol: '', port: '', time_range: '15m', min_bytes: '', status: '',
@@ -28,9 +29,22 @@ const deepFlowLogLimit = 500
 const graphWindowLabel = graphWindow.time_range
 const deepFlowWindowLabel = deepFlowLogWindow.time_range
 
-const activeWindowMs = 6000
+const activeWindowMs = 4000
 const canonicalRefreshDelayMs = 1000
+const tablePulseMs = 900
 type ActivityView = 'internal' | DeepFlowTableMode
+const graphExcludedPorts = new Set(
+  ((import.meta.env.VITE_GRAPH_EXCLUDED_PORTS as string | undefined) ?? '22,53,123,8080,18080,18081,20033,20035,30033,30035')
+    .split(',')
+    .map((item) => Number(item.trim()))
+    .filter((item) => Number.isFinite(item)),
+)
+const graphExcludedIPs = new Set(
+  ((import.meta.env.VITE_GRAPH_EXCLUDED_IPS as string | undefined) ?? '10.20.20.125,127.0.0.1')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean),
+)
 
 function isFlow(value: unknown): value is Flow {
   if (!value || typeof value !== 'object') return false
@@ -179,6 +193,7 @@ function vmTopologyOnly(graph: GraphData): GraphData {
 }
 
 function applyLiveFlow(graph: GraphData, flow: Flow, observedAt: string): GraphData {
+  if (graphExcludedPorts.has(flow.src_port) || graphExcludedPorts.has(flow.dst_port) || graphExcludedIPs.has(flow.src_ip) || graphExcludedIPs.has(flow.dst_ip)) return graph
   if (!flow.src_vm_id) return graph
   const sourceExists = graph.nodes.some((node) => node.id === flow.src_vm_id && node.type === 'vm')
   if (!sourceExists) return graph
@@ -196,6 +211,10 @@ function applyLiveFlow(graph: GraphData, flow: Flow, observedAt: string): GraphD
   const previous = index >= 0 ? graph.edges[index] : undefined
   const bytesSent = (previous?.bytes_sent ?? 0) + flow.bytes_sent
   const bytesReceived = (previous?.bytes_received ?? 0) + flow.bytes_received
+  const animatesRequest = (flow.request_count ?? 0) > 0
+  const activeUntil = animatesRequest
+    ? new Date(Date.parse(observedAt) + activeWindowMs).toISOString()
+    : previous?.active_until || observedAt
   const edge: GraphEdge = {
     id,
     source: flow.src_vm_id,
@@ -211,8 +230,8 @@ function applyLiveFlow(graph: GraphData, flow: Flow, observedAt: string): GraphD
     first_seen: previous?.first_seen ?? flow.first_seen,
     last_seen: flow.last_seen,
     last_observed_at: observedAt,
-    active: true,
-    active_until: new Date(Date.parse(observedAt) + activeWindowMs).toISOString(),
+    active: animatesRequest || (previous?.active === true && Date.parse(previous.active_until) > Date.now()),
+    active_until: activeUntil,
     weight: edgeWeight(bytesSent + bytesReceived),
     kind: 'traffic',
   }
@@ -241,6 +260,7 @@ export function App() {
   const [selectedNode, setSelectedNode] = useState<GraphNode>()
   const [connected, setConnected] = useState(false)
   const [error, setError] = useState('')
+  const [freshTabs, setFreshTabs] = useState<Partial<Record<ActivityView, boolean>>>({})
   const refreshTimer = useRef<number>()
   const vmInventory = useRef<GraphNode[]>([])
 
@@ -343,10 +363,45 @@ export function App() {
       .filter((edge) => vmIDs.has(edge.source) && vmIDs.has(edge.target) && edge.source !== edge.target)
       .map((edge) => [edge.source, edge.target].sort().join('<->')),
   ).size
+  const deepFlowConnectionCount = Array.isArray(deepFlowRaw?.l4) ? deepFlowRaw.l4.filter(isDeepFlowConnectionFlow).length : 0
+  const deepFlowRequestCount = Array.isArray(deepFlowRaw?.l7) ? deepFlowRaw.l7.filter(isDeepFlowRequestFlow).length : 0
+  const tableSignatures = useMemo<Record<ActivityView, string>>(() => {
+    const l4Rows = Array.isArray(deepFlowRaw?.l4) ? deepFlowRaw.l4 : []
+    const l7Rows = Array.isArray(deepFlowRaw?.l7) ? deepFlowRaw.l7 : []
+    return {
+      internal: internalActivity.slice(0, 5).map((item) => `${item.id}:${item.observed_at}`).join('|'),
+      connection: l4Rows.filter(isDeepFlowConnectionFlow).slice(0, 5).map((item) => `${item.time}:${item.source_ip}:${item.dest_ip}:${item.server_port}`).join('|'),
+      request: l7Rows.filter(isDeepFlowRequestFlow).slice(0, 5).map((item) => `${item.time}:${item.source_ip}:${item.dest_ip}:${item.request_resource}:${item.response_code}`).join('|'),
+      l4: l4Rows.slice(0, 5).map((item) => `${item.time}:${item.source_ip}:${item.dest_ip}:${item.server_port}`).join('|'),
+      l7: l7Rows.slice(0, 5).map((item) => `${item.time}:${item.source_ip}:${item.dest_ip}:${item.request_resource}:${item.response_code}`).join('|'),
+    }
+  }, [deepFlowRaw, internalActivity])
+  const previousTableSignatures = useRef(tableSignatures)
+  useEffect(() => {
+    const changedTabs = (Object.keys(tableSignatures) as ActivityView[])
+      .filter((tab) => previousTableSignatures.current[tab] !== tableSignatures[tab] && tableSignatures[tab] !== '')
+    previousTableSignatures.current = tableSignatures
+    if (changedTabs.length === 0) return
+    setFreshTabs((current) => {
+      const next = { ...current }
+      changedTabs.forEach((tab) => { next[tab] = true })
+      return next
+    })
+    const timeout = window.setTimeout(() => {
+      setFreshTabs((current) => {
+        const next = { ...current }
+        changedTabs.forEach((tab) => { delete next[tab] })
+        return next
+      })
+    }, tablePulseMs)
+    return () => window.clearTimeout(timeout)
+  }, [tableSignatures])
   const tableTabs: Array<{ id: ActivityView; label: string; count: number }> = [
     { id: 'internal', label: 'Internal Activity', count: internalActivity.length },
-    { id: 'l4', label: 'L4 Flows', count: deepFlowRaw?.l4.length ?? 0 },
-    { id: 'l7', label: 'L7 Requests', count: deepFlowRaw?.l7.length ?? 0 },
+    { id: 'connection', label: 'Connection Flow', count: deepFlowConnectionCount },
+    { id: 'request', label: 'Request Flow', count: deepFlowRequestCount },
+    { id: 'l4', label: 'L4 Flows', count: Array.isArray(deepFlowRaw?.l4) ? deepFlowRaw.l4.length : 0 },
+    { id: 'l7', label: 'L7 Requests', count: Array.isArray(deepFlowRaw?.l7) ? deepFlowRaw.l7.length : 0 },
   ]
 
   return <main className="app-shell">
@@ -354,6 +409,8 @@ export function App() {
       <div className="header-actions">
         <a className="grafana-link" href={GRAFANA_L4_URL} target="_blank" rel="noreferrer">Grafana L4</a>
         <a className="grafana-link" href={GRAFANA_L7_URL} target="_blank" rel="noreferrer">Grafana L7</a>
+        <a className="grafana-link" href={GRAFANA_NETWORK_HOST_URL} target="_blank" rel="noreferrer">Network Host</a>
+        <a className="grafana-link" href={GRAFANA_APPLICATION_HOST_URL} target="_blank" rel="noreferrer">App Host</a>
         <div className="live-state"><i className={connected ? 'connected' : ''} /><span>{connected ? 'Realtime connected' : 'Realtime reconnecting'}</span></div>
       </div>
     </header>
@@ -363,7 +420,7 @@ export function App() {
       <div className="graph-card">
         <div className="graph-heading">
           <div><small>VM TOPOLOGY</small></div>
-          <div className="legend"><span className="vm-dot">Virtual machine</span><span className="edge-line active-line">Active traffic</span><span className="edge-line idle-line">Idle history</span><span className="edge-line reachability-line">Reachable</span></div>
+          <div className="legend"><span className="vm-dot">Virtual machine</span><span className="edge-line idle-line">Connection</span><span className="edge-line active-line">Request traffic</span></div>
         </div>
         <GraphView graph={displayGraph} onNodeSelect={setSelectedNode} />
       </div>
@@ -376,7 +433,7 @@ export function App() {
           type="button"
           role="tab"
           aria-selected={activityView === tab.id}
-          className={`activity-tab${activityView === tab.id ? ' active' : ''}`}
+          className={`activity-tab${activityView === tab.id ? ' active' : ''}${freshTabs[tab.id] ? ' updated' : ''}`}
           onClick={() => setActivityView(tab.id)}
         >
           <span>{tab.label}</span>
