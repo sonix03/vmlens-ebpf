@@ -38,6 +38,26 @@ func TestFlowFilterAllowAndDenyCIDRs(t *testing.T) {
 	}
 }
 
+func TestIgnoreFlowDropsProbePortWithoutDroppingPeerVM(t *testing.T) {
+	controlPlane := newEndpointFilter("http://127.0.0.1:18080", []string{"10.20.20.125"})
+	peerTraffic := telemetry.FlowEvent{SrcIP: "10.20.20.130", DstIP: "10.20.20.199", SrcPort: 43000, DstPort: 8081}
+	if ignoreFlow(controlPlane, peerTraffic, []int{18081}) {
+		t.Fatal("normal peer traffic must stay visible")
+	}
+	probeTraffic := telemetry.FlowEvent{SrcIP: "10.20.20.130", DstIP: "10.20.20.199", SrcPort: 43000, DstPort: 18081}
+	if !ignoreFlow(controlPlane, probeTraffic, []int{18081}) {
+		t.Fatal("vmlens probe port must be ignored by flow metrics")
+	}
+}
+
+func TestIgnoreFlowDropsControlPlane(t *testing.T) {
+	controlPlane := newEndpointFilter("http://127.0.0.1:18080", []string{"10.20.20.125"})
+	event := telemetry.FlowEvent{SrcIP: "10.20.20.130", DstIP: "10.20.20.125", SrcPort: 43000, DstPort: 8080}
+	if !ignoreFlow(controlPlane, event, nil) {
+		t.Fatal("control-plane destination must be ignored")
+	}
+}
+
 func TestFlowAccumulatorPreservesByteTotals(t *testing.T) {
 	accumulator := newFlowAccumulator()
 	first := time.Date(2026, 7, 6, 10, 0, 0, 0, time.UTC)

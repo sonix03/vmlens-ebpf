@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -34,6 +35,41 @@ func (s *Sender) Heartbeat(ctx context.Context, heartbeat telemetry.Heartbeat) e
 
 func (s *Sender) Flow(ctx context.Context, flow telemetry.FlowEvent) error {
 	return s.post(ctx, "/api/flows/ingest", flow, nil)
+}
+
+func (s *Sender) ConnectionTargets(ctx context.Context, agentID string) ([]telemetry.ConnectionProbeTarget, error) {
+	var result []telemetry.ConnectionProbeTarget
+	err := s.get(ctx, "/api/connections/targets?agent_id="+url.QueryEscape(agentID), &result)
+	return result, err
+}
+
+func (s *Sender) ConnectionProbe(ctx context.Context, probe telemetry.ConnectionProbeEvent) error {
+	return s.post(ctx, "/api/connections/probe", probe, nil)
+}
+
+func (s *Sender) get(ctx context.Context, path string, response any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	res, err := s.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return fmt.Errorf("backend %s returned %s: %s", path, res.Status, strings.TrimSpace(string(body)))
+	}
+	if response != nil && len(body) > 0 {
+		if err := json.Unmarshal(body, response); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Sender) post(ctx context.Context, path string, request, response any) error {

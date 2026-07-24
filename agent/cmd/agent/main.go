@@ -16,6 +16,7 @@ import (
 	"github.com/vmlens/vmlens/agent/internal/config"
 	"github.com/vmlens/vmlens/agent/internal/identity"
 	"github.com/vmlens/vmlens/agent/internal/lifecycle"
+	"github.com/vmlens/vmlens/agent/internal/probe"
 	"github.com/vmlens/vmlens/agent/internal/telemetry"
 	"github.com/vmlens/vmlens/agent/internal/transport"
 )
@@ -50,6 +51,7 @@ func run() error {
 	}
 	log.Printf("registered agent=%s vm=%s hostname=%s mock=%t", result.AgentID, result.VMID, registration.Hostname, cfg.MockMode)
 	go lifecycle.Run(ctx, registration, cfg.HeartbeatInterval, client)
+	probe.Run(ctx, cfg, client, result.AgentID)
 
 	var source capture.Collector
 	if cfg.MockMode {
@@ -94,7 +96,7 @@ func run() error {
 			// Do not observe the observability transport itself. Sending an ingest
 			// request creates socket activity; forwarding that activity again would
 			// create a self-amplifying control-plane feedback loop.
-			if ignoreFlow(controlPlane, event.DstIP) {
+			if ignoreFlow(controlPlane, event, cfg.IgnorePorts) {
 				continue
 			}
 			if !flowFilter.allows(event) {
@@ -161,6 +163,7 @@ func (a *flowAccumulator) Add(event telemetry.FlowEvent) {
 	current.Packets += event.Packets
 	current.ConnectionCount += event.ConnectionCount
 	current.RequestCount += event.RequestCount
+	current.ErrorCount += event.ErrorCount
 	if current.FirstSeen.IsZero() || (!event.FirstSeen.IsZero() && event.FirstSeen.Before(current.FirstSeen)) {
 		current.FirstSeen = event.FirstSeen
 	}
@@ -243,12 +246,20 @@ func (f endpointFilter) matches(ip string) bool {
 	return excluded
 }
 
-func ignoreFlow(controlPlane endpointFilter, destination string) bool {
-	address := net.ParseIP(destination)
+func ignoreFlow(controlPlane endpointFilter, event telemetry.FlowEvent, ignoredPorts []int) bool {
+	address := net.ParseIP(event.DstIP)
 	if address == nil || address.IsUnspecified() || address.IsLoopback() {
 		return true
 	}
-	return controlPlane.matches(destination)
+	if controlPlane.matches(event.DstIP) {
+		return true
+	}
+	for _, port := range ignoredPorts {
+		if port == event.SrcPort || port == event.DstPort {
+			return true
+		}
+	}
+	return false
 }
 
 func newFlowFilter(rawAllow, rawDeny []string) (flowFilter, error) {

@@ -9,26 +9,31 @@ import (
 )
 
 type Config struct {
-	BackendURL        string
-	MockMode          bool
-	HeartbeatInterval time.Duration
-	FlowInterval      time.Duration
-	HTTPTimeout       time.Duration
-	BPFObject         string
-	CaptureMode       string
-	CaptureInterface  string
-	AgentID           string
-	Hostname          string
-	MachineID         string
-	TenantID          string
-	PrivateIPs        []string
-	PublicIP          string
-	MACAddresses      []string
-	IgnoreIPs         []string
-	AllowCIDRs        []string
-	DenyCIDRs         []string
-	Environment       string
-	AgentVersion      string
+	BackendURL                  string
+	MockMode                    bool
+	HeartbeatInterval           time.Duration
+	FlowInterval                time.Duration
+	HTTPTimeout                 time.Duration
+	BPFObject                   string
+	CaptureMode                 string
+	CaptureInterface            string
+	ConnectivityProbeEnabled    bool
+	ConnectivityProbeInterval   time.Duration
+	ConnectivityProbeTimeout    time.Duration
+	ConnectivityProbeListenAddr string
+	AgentID                     string
+	Hostname                    string
+	MachineID                   string
+	TenantID                    string
+	PrivateIPs                  []string
+	PublicIP                    string
+	MACAddresses                []string
+	IgnoreIPs                   []string
+	IgnorePorts                 []int
+	AllowCIDRs                  []string
+	DenyCIDRs                   []string
+	Environment                 string
+	AgentVersion                string
 }
 
 func Load() (Config, error) {
@@ -48,17 +53,34 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("parse HTTP_TIMEOUT: %w", err)
 	}
+	probeEnabled, err := strconv.ParseBool(env("CONNECTIVITY_PROBE_ENABLED", "true"))
+	if err != nil {
+		return Config{}, fmt.Errorf("parse CONNECTIVITY_PROBE_ENABLED: %w", err)
+	}
+	probeInterval, err := time.ParseDuration(env("CONNECTIVITY_PROBE_INTERVAL", "5s"))
+	if err != nil {
+		return Config{}, fmt.Errorf("parse CONNECTIVITY_PROBE_INTERVAL: %w", err)
+	}
+	probeTimeout, err := time.ParseDuration(env("CONNECTIVITY_PROBE_TIMEOUT", "1s"))
+	if err != nil {
+		return Config{}, fmt.Errorf("parse CONNECTIVITY_PROBE_TIMEOUT: %w", err)
+	}
 	return Config{
 		BackendURL: env("BACKEND_URL", "http://localhost:8080"), MockMode: mockMode,
 		HeartbeatInterval: heartbeat, FlowInterval: flowInterval, HTTPTimeout: httpTimeout,
-		BPFObject:        env("BPF_OBJECT", "./ebpf/flow_tracker.bpf.o"),
-		CaptureMode:      env("CAPTURE_MODE", "tc"),
-		CaptureInterface: env("CAPTURE_INTERFACE", "ens3"),
-		AgentID:          os.Getenv("AGENT_ID"),
-		Hostname:         os.Getenv("AGENT_HOSTNAME"), MachineID: os.Getenv("MACHINE_ID"),
+		BPFObject:                   env("BPF_OBJECT", "./ebpf/flow_tracker.bpf.o"),
+		CaptureMode:                 env("CAPTURE_MODE", "tc"),
+		CaptureInterface:            env("CAPTURE_INTERFACE", "ens3"),
+		ConnectivityProbeEnabled:    probeEnabled,
+		ConnectivityProbeInterval:   probeInterval,
+		ConnectivityProbeTimeout:    probeTimeout,
+		ConnectivityProbeListenAddr: env("CONNECTIVITY_PROBE_LISTEN_ADDR", "0.0.0.0:18081"),
+		AgentID:                     os.Getenv("AGENT_ID"),
+		Hostname:                    os.Getenv("AGENT_HOSTNAME"), MachineID: os.Getenv("MACHINE_ID"),
 		TenantID: os.Getenv("TENANT_ID"), PrivateIPs: csv(os.Getenv("AGENT_PRIVATE_IPS")),
 		PublicIP: os.Getenv("AGENT_PUBLIC_IP"), MACAddresses: csv(os.Getenv("AGENT_MAC_ADDRESSES")),
 		IgnoreIPs:   csv(os.Getenv("IGNORE_IPS")),
+		IgnorePorts: intCSV(env("IGNORE_PORTS", "18080,18081,30033,30035")),
 		AllowCIDRs:  csv(os.Getenv("FLOW_ALLOW_CIDRS")),
 		DenyCIDRs:   csv(os.Getenv("FLOW_DENY_CIDRS")),
 		Environment: env("AGENT_ENVIRONMENT", "local"), AgentVersion: env("AGENT_VERSION", "0.1.0"),
@@ -82,6 +104,23 @@ func csv(raw string) []string {
 		if value := strings.TrimSpace(part); value != "" {
 			out = append(out, value)
 		}
+	}
+	return out
+}
+
+func intCSV(raw string) []int {
+	parts := strings.Split(raw, ",")
+	out := make([]int, 0, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value == "" {
+			continue
+		}
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			continue
+		}
+		out = append(out, parsed)
 	}
 	return out
 }
