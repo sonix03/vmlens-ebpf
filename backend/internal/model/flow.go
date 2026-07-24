@@ -15,37 +15,40 @@ type FlowEvent struct {
 	Packets         int64     `json:"packets"`
 	ConnectionCount int64     `json:"connection_count"`
 	RequestCount    int64     `json:"request_count"`
+	ErrorCount      int64     `json:"error_count"`
 	FirstSeen       time.Time `json:"first_seen"`
 	LastSeen        time.Time `json:"last_seen"`
 	Interface       string    `json:"interface"`
 }
 
 type Flow struct {
-	ID                string    `json:"id"`
-	AgentID           string    `json:"agent_id,omitempty"`
-	SrcVMID           string    `json:"src_vm_id,omitempty"`
-	DstVMID           string    `json:"dst_vm_id,omitempty"`
-	SrcIP             string    `json:"src_ip"`
-	DstIP             string    `json:"dst_ip"`
-	SrcPort           int       `json:"src_port"`
-	DstPort           int       `json:"dst_port"`
-	Protocol          string    `json:"protocol"`
-	Direction         string    `json:"direction"`
-	Scope             string    `json:"scope"`
-	Service           string    `json:"service"`
-	ServicePort       int       `json:"service_port"`
-	BytesSent         int64     `json:"bytes_sent"`
-	BytesReceived     int64     `json:"bytes_received"`
-	Packets           int64     `json:"packets"`
-	ConnectionCount   int64     `json:"connection_count"`
-	RequestCount      int64     `json:"request_count"`
-	RequestsPerSec    float64   `json:"requests_per_second"`
-	ConnectionsPerSec float64   `json:"connections_per_second"`
-	FirstSeen         time.Time `json:"first_seen"`
-	LastSeen          time.Time `json:"last_seen"`
-	ObservedAt        time.Time `json:"observed_at"`
-	InterfaceName     string    `json:"interface_name,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
+	ID                string     `json:"id"`
+	AgentID           string     `json:"agent_id,omitempty"`
+	SrcVMID           string     `json:"src_vm_id,omitempty"`
+	DstVMID           string     `json:"dst_vm_id,omitempty"`
+	SrcIP             string     `json:"src_ip"`
+	DstIP             string     `json:"dst_ip"`
+	SrcPort           int        `json:"src_port"`
+	DstPort           int        `json:"dst_port"`
+	Protocol          string     `json:"protocol"`
+	Direction         string     `json:"direction"`
+	Scope             string     `json:"scope"`
+	Service           string     `json:"service"`
+	ServicePort       int        `json:"service_port"`
+	BytesSent         int64      `json:"bytes_sent"`
+	BytesReceived     int64      `json:"bytes_received"`
+	Packets           int64      `json:"packets"`
+	ConnectionCount   int64      `json:"connection_count"`
+	RequestCount      int64      `json:"request_count"`
+	ErrorCount        int64      `json:"error_count"`
+	RequestsPerSec    float64    `json:"requests_per_second"`
+	ConnectionsPerSec float64    `json:"connections_per_second"`
+	FirstSeen         time.Time  `json:"first_seen"`
+	LastSeen          time.Time  `json:"last_seen"`
+	ObservedAt        time.Time  `json:"observed_at"`
+	LastErrorAt       *time.Time `json:"last_error_at,omitempty"`
+	InterfaceName     string     `json:"interface_name,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
 }
 
 type InternalActivity struct {
@@ -73,6 +76,7 @@ type InternalActivity struct {
 	BytesReceived     int64     `json:"bytes_received"`
 	ConnectionCount   int64     `json:"connection_count"`
 	RequestCount      int64     `json:"request_count"`
+	ErrorCount        int64     `json:"error_count"`
 	RequestsPerSec    float64   `json:"requests_per_second"`
 	ConnectionsPerSec float64   `json:"connections_per_second"`
 	FirstSeen         time.Time `json:"first_seen"`
