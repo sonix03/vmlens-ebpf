@@ -15,12 +15,22 @@ type Event struct {
 }
 
 type Hub struct {
-	mu      sync.RWMutex
-	clients map[chan []byte]struct{}
+	mu         sync.RWMutex
+	clients    map[chan []byte]struct{}
+	throttleMu sync.Mutex
+	throttled  map[string]throttledEvent
+}
+
+type throttledEvent struct {
+	payload []byte
+	timer   *time.Timer
 }
 
 func New() *Hub {
-	return &Hub{clients: make(map[chan []byte]struct{})}
+	return &Hub{
+		clients:   make(map[chan []byte]struct{}),
+		throttled: make(map[string]throttledEvent),
+	}
 }
 
 func (h *Hub) Broadcast(eventType string, data any) {
@@ -28,6 +38,47 @@ func (h *Hub) Broadcast(eventType string, data any) {
 	if err != nil {
 		return
 	}
+	h.broadcastPayload(payload)
+}
+
+func (h *Hub) BroadcastLatest(eventType string, data any, interval time.Duration) {
+	if interval <= 0 {
+		h.Broadcast(eventType, data)
+		return
+	}
+	payload, err := json.Marshal(Event{Type: eventType, Data: data, Timestamp: time.Now().UTC()})
+	if err != nil {
+		return
+	}
+
+	h.throttleMu.Lock()
+	if current, ok := h.throttled[eventType]; ok {
+		current.payload = payload
+		h.throttled[eventType] = current
+		h.throttleMu.Unlock()
+		return
+	}
+	h.throttled[eventType] = throttledEvent{payload: payload}
+	timer := time.AfterFunc(interval, func() { h.flushLatest(eventType) })
+	current := h.throttled[eventType]
+	current.timer = timer
+	h.throttled[eventType] = current
+	h.throttleMu.Unlock()
+}
+
+func (h *Hub) flushLatest(eventType string) {
+	h.throttleMu.Lock()
+	current, ok := h.throttled[eventType]
+	if ok {
+		delete(h.throttled, eventType)
+	}
+	h.throttleMu.Unlock()
+	if ok {
+		h.broadcastPayload(current.payload)
+	}
+}
+
+func (h *Hub) broadcastPayload(payload []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for client := range h.clients {

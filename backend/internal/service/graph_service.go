@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sort"
 	"strings"
@@ -25,6 +26,12 @@ type GraphVisibility struct {
 	IncludeIdle   bool
 }
 
+const (
+	graphEdgeKindTraffic      = "traffic"
+	graphEdgeKindReachability = "reachability"
+	connectionProbeGraphTTL   = 30 * time.Second
+)
+
 func NewGraphService(pool *pgxpool.Pool, vmService *VMService, flowActiveWindow time.Duration, visibility GraphVisibility) *GraphService {
 	return &GraphService{pool: pool, vmService: vmService, flowActiveWindow: flowActiveWindow, visibility: visibility}
 }
@@ -45,9 +52,11 @@ type graphFlowRow struct {
 	Packets       int64
 	Connections   int64
 	Requests      int64
+	Errors        int64
 	FirstSeen     time.Time
 	LastSeen      time.Time
 	ObservedAt    time.Time
+	LastErrorAt   sql.NullTime
 	SrcName       string
 	SrcTenant     string
 	SrcPrivateIP  string
@@ -62,6 +71,31 @@ type graphFlowRow struct {
 	DstAgentID    string
 }
 
+type graphProbeRow struct {
+	AgentID      string
+	SrcVMID      string
+	DstVMID      string
+	SrcIP        string
+	DstIP        string
+	Protocol     string
+	DstPort      int
+	Scope        string
+	RTTMs        float64
+	FirstSeen    time.Time
+	LastSeen     time.Time
+	ObservedAt   time.Time
+	SrcName      string
+	SrcTenant    string
+	SrcPrivateIP string
+	SrcStatus    string
+	SrcRole      string
+	DstName      string
+	DstTenant    string
+	DstPrivateIP string
+	DstStatus    string
+	DstRole      string
+}
+
 func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model.Graph, error) {
 	if filter.TimeRange <= 0 {
 		filter.TimeRange = 15 * time.Minute
@@ -69,7 +103,8 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 	query := `
 		SELECT COALESCE(f.agent_id, ''), COALESCE(f.src_vm_id, ''), COALESCE(f.dst_vm_id, ''),
 		       host(f.src_ip), host(f.dst_ip), COALESCE(f.src_port, 0), COALESCE(f.dst_port, 0), f.protocol, f.direction, f.scope,
-		       f.bytes_sent, f.bytes_received, f.packets, f.connection_count, f.request_count, f.first_seen, f.last_seen, f.observed_at,
+		       f.bytes_sent, f.bytes_received, f.packets, f.connection_count, f.request_count, f.error_count,
+		       f.first_seen, f.last_seen, f.observed_at, f.last_error_at,
 		       COALESCE(sv.name, ''), COALESCE(sv.tenant_id, ''), COALESCE(host(sv.private_ip), ''),
 		       COALESCE(sv.status, ''), COALESCE(sv.role, ''), COALESCE(sv.agent_id, ''),
 		       COALESCE(dv.name, ''), COALESCE(dv.tenant_id, ''), COALESCE(host(dv.private_ip), ''),
@@ -121,7 +156,7 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 		if err := rows.Scan(
 			&row.AgentID, &row.SrcVMID, &row.DstVMID, &row.SrcIP, &row.DstIP, &row.SrcPort,
 			&row.DstPort, &row.Protocol, &row.Direction, &row.Scope, &row.BytesSent, &row.BytesReceived,
-			&row.Packets, &row.Connections, &row.Requests, &row.FirstSeen, &row.LastSeen, &row.ObservedAt,
+			&row.Packets, &row.Connections, &row.Requests, &row.Errors, &row.FirstSeen, &row.LastSeen, &row.ObservedAt, &row.LastErrorAt,
 			&row.SrcName, &row.SrcTenant, &row.SrcPrivateIP, &row.SrcStatus, &row.SrcRole, &row.SrcAgentID,
 			&row.DstName, &row.DstTenant, &row.DstPrivateIP, &row.DstStatus, &row.DstRole, &row.DstAgentID,
 		); err != nil {
@@ -130,6 +165,10 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 		flowRows = append(flowRows, row)
 	}
 	if err := rows.Err(); err != nil {
+		return model.Graph{}, err
+	}
+	probeRows, err := s.connectionProbeRows(ctx, filter)
+	if err != nil {
 		return model.Graph{}, err
 	}
 
@@ -218,16 +257,24 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 		edgeID := graphEdgeID(sourceID, targetID, row.Protocol, row.Scope)
 		edge, ok := edges[edgeID]
 		if !ok {
-			edge = &model.GraphEdge{ID: edgeID, Source: sourceID, Target: targetID, Protocol: row.Protocol, DstPort: row.DstPort, Scope: row.Scope, FirstSeen: row.FirstSeen, LastSeen: row.LastSeen}
+			edge = &model.GraphEdge{ID: edgeID, Source: sourceID, Target: targetID, Protocol: row.Protocol, DstPort: row.DstPort, Scope: row.Scope, FirstSeen: row.FirstSeen, LastSeen: row.LastSeen, Kind: graphEdgeKindTraffic}
 			edges[edgeID] = edge
 		} else {
 			edge.DstPort = preferredGraphPort(edge.DstPort, row.DstPort)
+			if edge.Kind == "" {
+				edge.Kind = graphEdgeKindTraffic
+			}
 		}
 		edge.BytesSent += row.BytesSent
 		edge.BytesReceived += row.BytesReceived
 		edge.Packets += row.Packets
 		edge.ConnectionCount += row.Connections
 		edge.RequestCount += row.Requests
+		edge.ErrorCount += row.Errors
+		if row.LastErrorAt.Valid && (edge.LastErrorAt == nil || row.LastErrorAt.Time.After(*edge.LastErrorAt)) {
+			value := row.LastErrorAt.Time
+			edge.LastErrorAt = &value
+		}
 		if row.FirstSeen.Before(edge.FirstSeen) {
 			edge.FirstSeen = row.FirstSeen
 		}
@@ -243,6 +290,59 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 		nodes[sourceID].TrafficIn += row.BytesReceived
 		nodes[targetID].TrafficIn += row.BytesSent
 		nodes[targetID].TrafficOut += row.BytesReceived
+	}
+
+	for _, row := range probeRows {
+		if hiddenByGraphIPs(s.visibility, row.SrcIP, row.DstIP) {
+			continue
+		}
+		if row.SrcVMID == "" || row.DstVMID == "" || row.SrcVMID == row.DstVMID || row.SrcIP == row.DstIP {
+			continue
+		}
+		if _, registered := vmByID[row.SrcVMID]; registered {
+			if _, visible := nodes[row.SrcVMID]; !visible {
+				continue
+			}
+		}
+		if _, registered := vmByID[row.DstVMID]; registered {
+			if _, visible := nodes[row.DstVMID]; !visible {
+				continue
+			}
+		}
+		sourceID, targetID := row.SrcVMID, row.DstVMID
+		if _, ok := nodes[sourceID]; !ok {
+			node := vmNode(sourceID, valueOr(row.SrcName, row.SrcIP), valueOr(row.SrcPrivateIP, row.SrcIP), valueOr(row.SrcStatus, "unknown"), row.SrcTenant, row.SrcRole)
+			nodes[sourceID] = &node
+		}
+		if _, ok := nodes[targetID]; !ok {
+			node := vmNode(targetID, valueOr(row.DstName, row.DstIP), valueOr(row.DstPrivateIP, row.DstIP), valueOr(row.DstStatus, "unknown"), row.DstTenant, row.DstRole)
+			nodes[targetID] = &node
+		}
+
+		edgeID := graphEdgeID(sourceID, targetID, row.Protocol, graphEdgeKindReachability)
+		edge, ok := edges[edgeID]
+		if !ok {
+			edge = &model.GraphEdge{
+				ID: edgeID, Source: sourceID, Target: targetID, Protocol: row.Protocol,
+				DstPort: row.DstPort, Scope: row.Scope, FirstSeen: row.FirstSeen,
+				LastSeen: row.LastSeen, LastObservedAt: row.ObservedAt,
+				Kind: graphEdgeKindReachability, Reachable: true, AvgRTTMs: row.RTTMs, Weight: 1,
+			}
+			edges[edgeID] = edge
+			continue
+		}
+		if row.FirstSeen.Before(edge.FirstSeen) {
+			edge.FirstSeen = row.FirstSeen
+		}
+		if row.LastSeen.After(edge.LastSeen) {
+			edge.LastSeen = row.LastSeen
+		}
+		if row.ObservedAt.After(edge.LastObservedAt) {
+			edge.LastObservedAt = row.ObservedAt
+			edge.AvgRTTMs = row.RTTMs
+		}
+		edge.Reachable = true
+		edge.Kind = graphEdgeKindReachability
 	}
 
 	result := model.Graph{Nodes: make([]model.GraphNode, 0, len(nodes)), Edges: make([]model.GraphEdge, 0, len(edges))}
@@ -265,6 +365,71 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 	sort.Slice(result.Nodes, func(i, j int) bool { return result.Nodes[i].ID < result.Nodes[j].ID })
 	sort.Slice(result.Edges, func(i, j int) bool { return result.Edges[i].ID < result.Edges[j].ID })
 	return result, nil
+}
+
+func (s *GraphService) connectionProbeRows(ctx context.Context, filter model.GraphFilter) ([]graphProbeRow, error) {
+	query := `
+		SELECT COALESCE(p.agent_id, ''), COALESCE(p.src_vm_id, ''), COALESCE(p.dst_vm_id, ''),
+		       host(p.src_ip), host(p.dst_ip), p.protocol, p.dst_port,
+		       CASE WHEN COALESCE(sv.tenant_id, '') = COALESCE(dv.tenant_id, '') THEN 'internal_same_tenant' ELSE 'internal_cross_tenant' END AS scope,
+		       p.rtt_ms, p.first_seen, p.last_seen, p.observed_at,
+		       COALESCE(sv.name, ''), COALESCE(sv.tenant_id, ''), COALESCE(host(sv.private_ip), ''),
+		       COALESCE(sv.status, ''), COALESCE(sv.role, ''),
+		       COALESCE(dv.name, ''), COALESCE(dv.tenant_id, ''), COALESCE(host(dv.private_ip), ''),
+		       COALESCE(dv.status, ''), COALESCE(dv.role, '')
+		FROM connection_probes p
+		JOIN vms sv ON sv.id = p.src_vm_id
+		JOIN vms dv ON dv.id = p.dst_vm_id
+		WHERE p.success = true
+		  AND p.source = 'vmlens_probe'
+		  AND p.probe_type = 'connectivity_check'
+		  AND p.observed_at >= NOW() - $1::interval`
+	args := []any{fmt.Sprintf("%f seconds", connectionProbeGraphTTL.Seconds())}
+	add := func(condition string, value any) {
+		args = append(args, value)
+		placeholder := fmt.Sprintf("$%d", len(args))
+		query += " AND " + strings.ReplaceAll(condition, "$%d", placeholder)
+	}
+	if filter.AgentID != "" {
+		add("p.agent_id = $%d", filter.AgentID)
+	}
+	if filter.TenantID != "" {
+		add("(sv.tenant_id = $%d OR dv.tenant_id = $%d)", filter.TenantID)
+	}
+	if filter.VMID != "" {
+		add("(p.src_vm_id = $%d OR p.dst_vm_id = $%d)", filter.VMID)
+	}
+	if filter.Protocol != "" {
+		add("p.protocol = $%d", filter.Protocol)
+	}
+	if filter.Port > 0 {
+		add("p.dst_port = $%d", filter.Port)
+	}
+	if filter.Status != "" {
+		add("(sv.status = $%d OR dv.status = $%d)", filter.Status)
+	}
+	query += " ORDER BY p.observed_at DESC LIMIT 1000"
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []graphProbeRow{}
+	for rows.Next() {
+		var row graphProbeRow
+		if err := rows.Scan(
+			&row.AgentID, &row.SrcVMID, &row.DstVMID, &row.SrcIP, &row.DstIP,
+			&row.Protocol, &row.DstPort, &row.Scope, &row.RTTMs, &row.FirstSeen,
+			&row.LastSeen, &row.ObservedAt, &row.SrcName, &row.SrcTenant,
+			&row.SrcPrivateIP, &row.SrcStatus, &row.SrcRole, &row.DstName,
+			&row.DstTenant, &row.DstPrivateIP, &row.DstStatus, &row.DstRole,
+		); err != nil {
+			return nil, err
+		}
+		result = append(result, row)
+	}
+	return result, rows.Err()
 }
 
 func (s *GraphService) hideFlow(row graphFlowRow) bool {
@@ -309,6 +474,10 @@ func isEphemeralPort(port int) bool {
 func setEdgeActivity(edge *model.GraphEdge, now, observedAt time.Time, activeWindow time.Duration) {
 	edge.ActiveUntil = observedAt.Add(activeWindow)
 	edge.Active = now.Before(edge.ActiveUntil)
+	if edge.LastErrorAt != nil && !edge.LastErrorAt.IsZero() {
+		edge.FailedUntil = edge.LastErrorAt.Add(activeWindow)
+		edge.Failed = now.Before(edge.FailedUntil)
+	}
 }
 
 func visibleVM(vm model.VM, requestedStatus string, _ time.Time) bool {

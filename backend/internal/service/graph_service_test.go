@@ -41,6 +41,13 @@ func TestSetEdgeActivity(t *testing.T) {
 	if idle.Active {
 		t.Fatal("expected edge to become idle after the activity window")
 	}
+
+	lastErrorAt := now.Add(-time.Second)
+	failed := model.GraphEdge{LastErrorAt: &lastErrorAt}
+	setEdgeActivity(&failed, now, now.Add(-10*time.Second), 3*time.Second)
+	if !failed.Failed || !failed.FailedUntil.Equal(now.Add(2*time.Second)) {
+		t.Fatalf("expected failed edge until %s, got failed=%t until=%s", now.Add(2*time.Second), failed.Failed, failed.FailedUntil)
+	}
 }
 
 func TestGraphEdgeIDAggregatesEphemeralPorts(t *testing.T) {

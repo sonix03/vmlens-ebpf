@@ -7,6 +7,10 @@ func hiddenByGraphVisibility(visibility GraphVisibility, srcPort, dstPort int, s
 	if portMatchesAny(visibility.ExcludedPorts, srcPort, dstPort) {
 		return true
 	}
+	return hiddenByGraphIPs(visibility, srcIP, dstIP)
+}
+
+func hiddenByGraphIPs(visibility GraphVisibility, srcIP, dstIP string) bool {
 	for _, ip := range visibility.ExcludedIPs {
 		if ip == "" {
 			continue
