@@ -34,7 +34,7 @@ const canonicalRefreshDelayMs = 1000
 const tablePulseMs = 900
 type ActivityView = 'internal' | DeepFlowTableMode
 const graphExcludedPorts = new Set(
-  ((import.meta.env.VITE_GRAPH_EXCLUDED_PORTS as string | undefined) ?? '22,53,123,8080,18080,18081,20033,20035,30033,30035')
+  ((import.meta.env.VITE_GRAPH_EXCLUDED_PORTS as string | undefined) ?? '22,53,123,8080,18080,18081,18082,20033,20035,30033,30035')
     .split(',')
     .map((item) => Number(item.trim()))
     .filter((item) => Number.isFinite(item)),
@@ -211,10 +211,14 @@ function applyLiveFlow(graph: GraphData, flow: Flow, observedAt: string): GraphD
   const previous = index >= 0 ? graph.edges[index] : undefined
   const bytesSent = (previous?.bytes_sent ?? 0) + flow.bytes_sent
   const bytesReceived = (previous?.bytes_received ?? 0) + flow.bytes_received
+  const errorCount = flow.error_count ?? 0
   const animatesRequest = (flow.request_count ?? 0) > 0
   const activeUntil = animatesRequest
     ? new Date(Date.parse(observedAt) + activeWindowMs).toISOString()
     : previous?.active_until || observedAt
+  const failedUntil = errorCount > 0
+    ? new Date(Date.parse(observedAt) + activeWindowMs).toISOString()
+    : previous?.failed_until
   const edge: GraphEdge = {
     id,
     source: flow.src_vm_id,
@@ -227,11 +231,15 @@ function applyLiveFlow(graph: GraphData, flow: Flow, observedAt: string): GraphD
     packets: (previous?.packets ?? 0) + flow.packets,
     connection_count: (previous?.connection_count ?? 0) + flow.connection_count,
     request_count: (previous?.request_count ?? 0) + (flow.request_count ?? 0),
+    error_count: (previous?.error_count ?? 0) + errorCount,
     first_seen: previous?.first_seen ?? flow.first_seen,
     last_seen: flow.last_seen,
     last_observed_at: observedAt,
+    last_error_at: errorCount > 0 ? observedAt : previous?.last_error_at,
     active: animatesRequest || (previous?.active === true && Date.parse(previous.active_until) > Date.now()),
     active_until: activeUntil,
+    failed: errorCount > 0 || (previous?.failed === true && previous.failed_until !== undefined && Date.parse(previous.failed_until) > Date.now()),
+    failed_until: failedUntil,
     weight: edgeWeight(bytesSent + bytesReceived),
     kind: 'traffic',
   }
@@ -420,7 +428,7 @@ export function App() {
       <div className="graph-card">
         <div className="graph-heading">
           <div><small>VM TOPOLOGY</small></div>
-          <div className="legend"><span className="vm-dot">Virtual machine</span><span className="edge-line idle-line">Connection</span><span className="edge-line active-line">Request traffic</span></div>
+          <div className="legend"><span className="vm-dot">Virtual machine</span><span className="edge-line idle-line">Connection</span><span className="edge-line active-line">Request traffic</span><span className="edge-line failed-line">Failed attempt</span></div>
         </div>
         <GraphView graph={displayGraph} onNodeSelect={setSelectedNode} />
       </div>
