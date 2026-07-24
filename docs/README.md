@@ -6,11 +6,12 @@ Use this folder for product docs, setup guides and repeatable operations notes.
 architecture.md              system architecture
 deepflow-integration.md      DeepFlow L4/L7 integration notes
 external-multizone-tracking.md
+orbit-critical-probing.md    critical fallback probes without DeepFlow
 prebuilt-agent.md            release artifact and VM install flow
 privacy.md                   privacy and data boundary
 project-structure.md         repository layout
+screenshot/                  documentation screenshots
 setup/                       local, cloud and OpenStack setup guides
 runbooks/                    copy-paste command flows
 troubleshooting.md           known operational issues
 ```
-
