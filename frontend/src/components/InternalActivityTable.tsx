@@ -82,6 +82,7 @@ export function InternalActivityTable({
             </div></td>
             <td><div className="metric-stack">
               {metric('requests', `${item.request_count}`)}
+              {metric('errors', `${item.error_count}`)}
               {metric('rate', `${item.requests_per_second.toFixed(2)} req/s`)}
               {metric('connections', `${item.connections_per_second.toFixed(2)} conn/s`)}
             </div></td>

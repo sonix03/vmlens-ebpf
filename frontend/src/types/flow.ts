@@ -23,9 +23,11 @@ export interface Flow {
   packets: number
   connection_count: number
   request_count: number
+  error_count?: number
   requests_per_second?: number
   connections_per_second?: number
   first_seen: string
   last_seen: string
   observed_at?: string
+  last_error_at?: string
 }
