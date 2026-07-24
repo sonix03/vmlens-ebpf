@@ -34,6 +34,7 @@ services:
     volumes:
       - ./deploy/deepflow/common/config/mysql/my.cnf:/etc/my.cnf:ro
       - ./deploy/deepflow/common/config/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./deploy/deepflow/common/config/mysql/zz-vmlens-agent-group.sql:/docker-entrypoint-initdb.d/zz-vmlens-agent-group.sql:ro
       - deepflow_mysql_data:/var/lib/mysql
     networks:
       default:

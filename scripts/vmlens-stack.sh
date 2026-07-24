@@ -13,6 +13,7 @@ Usage:
   bash scripts/vmlens-stack.sh logs [--with-deepflow|--core] [service]
   bash scripts/vmlens-stack.sh health
   bash scripts/vmlens-stack.sh deepflow-domain
+  bash scripts/vmlens-stack.sh deepflow-agent-group
   bash scripts/vmlens-stack.sh grafana-refresh
 
 Default mode is --with-deepflow.
@@ -64,6 +65,10 @@ prepare_deepflow_lab() {
   wait_for_http "http://127.0.0.1:30417/v1/health/" "DeepFlow Controller" 60 \
     && bash "${ROOT_DIR}/scripts/deepflow-ensure-domain.sh" \
     || echo "warning: DeepFlow agent-sync domain was not ensured" >&2
+
+  wait_for_http "http://127.0.0.1:30417/v1/health/" "DeepFlow Controller" 60 \
+    && bash "${ROOT_DIR}/scripts/deepflow-ensure-agent-group.sh" \
+    || echo "warning: DeepFlow agent group was not tuned" >&2
 }
 
 case "${command}" in
@@ -79,6 +84,9 @@ case "${command}" in
   restart)
     run_compose down
     run_compose up -d --build
+    if [[ "${mode}" == "--with-deepflow" ]]; then
+      prepare_deepflow_lab
+    fi
     ;;
   status)
     run_compose ps
@@ -107,6 +115,9 @@ case "${command}" in
     ;;
   deepflow-domain)
     bash "${ROOT_DIR}/scripts/deepflow-ensure-domain.sh"
+    ;;
+  deepflow-agent-group)
+    bash "${ROOT_DIR}/scripts/deepflow-ensure-agent-group.sh"
     ;;
   grafana-refresh)
     bash "${ROOT_DIR}/scripts/deepflow-set-grafana-refresh.sh"
