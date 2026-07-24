@@ -258,6 +258,10 @@ sudo env \
   FLOW_INTERVAL=1s \
   CAPTURE_MODE=tc \
   CAPTURE_INTERFACE=ens3 \
+  CONNECTIVITY_PROBE_ENABLED=true \
+  CONNECTIVITY_PROBE_INTERVAL=5s \
+  CONNECTIVITY_PROBE_LISTEN_ADDR=0.0.0.0:18081 \
+  IGNORE_PORTS=18080,18081,18082,30033,30035 \
   AGENT_BINARY_URL=https://github.com/sonix03/vmlens-ebpf/releases/latest/download/vmlens-agent-linux-amd64 \
   BPF_OBJECT_URL=https://github.com/sonix03/vmlens-ebpf/releases/latest/download/flow_tracker-linux-amd64.bpf.o \
   INSTALL_DEEPFLOW_AGENT=true \
@@ -352,13 +356,27 @@ Grafana or ClickHouse.
 VMLens filters known telemetry/control traffic by default:
 
 ```text
-DEEPFLOW_EXCLUDED_PORTS=22,53,123,8080,18080,18081,20033,20035,30033,30035
+Agent IGNORE_PORTS=18080,18081,18082,30033,30035
+DEEPFLOW_EXCLUDED_PORTS=22,53,123,8080,18080,18081,18082,20033,20035,30033,30035
 DEEPFLOW_EXCLUDED_IPS=10.20.20.125,127.0.0.1,127.0.0.53
 DEEPFLOW_EXCLUDED_L7_RESOURCE_PREFIXES=/trident.,trident.,/api/agents/,/api/flows/ingest,/health
 ```
 
 This keeps VMLens request tables focused on application/testing traffic instead
 of VMLens tunnel or DeepFlow agent-to-server traffic.
+
+Connectivity lines use a separate VMLens probe:
+
+```text
+source=vmlens_probe
+type=connectivity_check
+counted_as_request=false
+counted_as_user_traffic=false
+```
+
+The probe keeps an existing VM-to-VM edge visible as an idle green line after
+real traffic has already created that relationship. Real request traffic uses
+the same line and adds directional animation for a short activity window.
 
 ## Common operations
 
