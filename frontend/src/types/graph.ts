@@ -31,6 +31,8 @@ export interface GraphEdge {
   last_observed_at: string
   active: boolean
   active_until: string
+  failed?: boolean
+  failed_until?: string
   weight: number
   kind?: 'traffic' | 'reachability' | string
   reachable?: boolean
@@ -41,6 +43,7 @@ export interface GraphEdge {
   direction?: string
   server_port?: number
   error_count?: number
+  last_error_at?: string
   total_bytes?: number
   avg_rtt_ms?: number
   p95_rtt_ms?: number

@@ -20,14 +20,18 @@ button, input, select { font: inherit; }
 .graph-edges { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .graph-edge { fill: none; stroke-linecap: round; transition: opacity .18s ease, stroke .18s ease, stroke-width .18s ease; }
 .graph-edge-label { fill: #aab2bc; paint-order: stroke; stroke: #0b1016; stroke-width: 4px; stroke-linejoin: round; font: 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; pointer-events: none; }
-.graph-edge-connection { stroke: #5fae7e; }
-.graph-edge-idle { stroke: #5fae7e; filter: drop-shadow(0 0 3px #5fae7e55); }
+.graph-edge-connection { stroke: #5fae7e; stroke-dasharray: 10 8; stroke-dashoffset: 0; }
+.graph-edge-idle { stroke: #5fae7e; filter: drop-shadow(0 0 3px #5fae7e55); animation: none; }
 .graph-edge-pulse { animation: graph-edge-pulse .9s ease-out; }
 .graph-edge-reachability { stroke: #79add1; stroke-dasharray: 8 7; animation: none; }
 .graph-edge-active { stroke: #93e8ae; stroke-dasharray: 10 8; opacity: .95; filter: drop-shadow(0 0 7px #93e8aeaa); animation: graph-edge-flow .7s linear infinite; }
+.graph-edge-failed { stroke: #d89b45; stroke-dasharray: 7 6; opacity: .98; filter: drop-shadow(0 0 9px #d89b45aa); animation: graph-edge-failed .42s linear infinite; }
 .graph-edge-reverse { animation-name: graph-edge-flow-reverse; }
+.graph-edge-failed.graph-edge-reverse { animation-name: graph-edge-failed-reverse; }
 @keyframes graph-edge-flow { to { stroke-dashoffset: -18; } }
 @keyframes graph-edge-flow-reverse { to { stroke-dashoffset: 18; } }
+@keyframes graph-edge-failed { 0% { stroke-dashoffset: 0; stroke: #f1c46d; } 50% { stroke: #d7654b; } 100% { stroke-dashoffset: -13; stroke: #f1c46d; } }
+@keyframes graph-edge-failed-reverse { 0% { stroke-dashoffset: 0; stroke: #f1c46d; } 50% { stroke: #d7654b; } 100% { stroke-dashoffset: 13; stroke: #f1c46d; } }
 @keyframes graph-edge-pulse { 0% { stroke: #b8ffd0; filter: drop-shadow(0 0 12px #93e8aecc); opacity: 1; } 100% { stroke: #5fae7e; filter: drop-shadow(0 0 3px #5fae7e55); } }
 .graph-controls { position: absolute; z-index: 12; right: 14px; bottom: 14px; display: flex; align-items: center; gap: 6px; padding: 6px; border: 1px solid #343b45; border-radius: 6px; background: #111820d9; box-shadow: 0 10px 26px #0007; backdrop-filter: blur(8px); }
 .graph-controls button { min-width: 34px; height: 30px; padding: 0 10px; border: 1px solid #3a4652; border-radius: 4px; background: #1a222b; color: #d7dde5; cursor: pointer; }
@@ -59,8 +63,9 @@ button, input, select { font: inherit; }
 .service-pill,.protocol-pill { display: inline-block; padding: 4px 8px; border-radius: 999px; color: #c7e5d1; background: #21372b; font: 700 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: nowrap; }.service-port { margin-left: 4px; color: #7d8895; font: 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }.protocol-pill { color: #c9d8e8; background: #23303d; text-transform: uppercase; }.direction-label { display: block; margin-top: 5px; color: #7d8895; font: 8px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-transform: uppercase; }.metric-stack { display: grid; gap: 5px; min-width: 118px; color: #a6adb6; font: 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }.metric-stack span { display: grid; gap: 1px; }.metric-stack strong { color: #d6dee7; font-size: 10px; font-weight: 700; }.metric-stack small { color: #728092; text-transform: uppercase; }.metric-stack.compact { min-width: 90px; }.activity-bytes,.activity-frequency { display: grid; gap: 3px; min-width: 74px; color: #a6adb6; font: 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }.activity-frequency { min-width: 120px; color: #c7d2df; }.activity-frequency small { color: #697380; }.activity-empty { height: 110px; color: #657180; text-align: center; }
 .deepflow-card { margin-top: 12px; }.deepflow-heading-meta { display: flex !important; align-items: center; gap: 8px; }.deepflow-heading-meta small { color: #697380; font: 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0; text-transform: none; }.deepflow-state { display: inline-block; padding: 4px 8px; border-radius: 999px; font: 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-transform: uppercase; }.deepflow-connected { color: #b9d4c4; background: #21372b; }.deepflow-waiting { color: #d0aa68; background: #4b3b23; }.deepflow-degraded,.deepflow-disabled { color: #e3a4a4; background: #442225; }.deepflow-note { padding: 8px 16px; border-bottom: 1px solid #252b33; color: #d0aa68; background: #17140f; font-size: 10px; }.deepflow-note.error { color: #e3a4a4; background: #241416; }.deepflow-table .activity-route { min-width: 420px; }.deepflow-ok-code,.deepflow-error-code { display: inline-block; min-width: 40px; padding: 4px 8px; border-radius: 999px; text-align: center; font: 700 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }.deepflow-ok-code { color: #b9d4c4; background: #21372b; }.deepflow-error-code { color: #e3a4a4; background: #442225; }
 footer { display: flex; justify-content: space-between; margin-top: 13px; color: #536176; font-size: 10px; }
-.legend .edge-line::before { width: 18px; height: 1px; border-radius: 0; vertical-align: middle; background: #93e8ae; }
-.legend .idle-line::before { background: #5fae7e; opacity: .8; }
+.legend .edge-line::before { width: 18px; height: 1px; border-radius: 0; vertical-align: middle; background: repeating-linear-gradient(90deg, #93e8ae 0 5px, transparent 5px 8px); }
+.legend .idle-line::before { background: repeating-linear-gradient(90deg, #5fae7e 0 5px, transparent 5px 8px); opacity: .8; }
+.legend .failed-line::before { background: repeating-linear-gradient(90deg, #d89b45 0 5px, transparent 5px 8px); }
 .legend .reachability-line::before { background: transparent; border-top: 1px dashed #79add1; }
 .react-flow__edge.traffic-idle .react-flow__edge-path { transition: stroke .2s ease, opacity .2s ease; }
 .graph-node-button { position: absolute; z-index: 2; width: 270px; min-height: 64px; padding: 12px 22px; border: 1px solid #55a979; border-radius: 999px; outline: none; background: #252a30; color: #f1f3f5; box-shadow: 0 10px 26px #0005; cursor: pointer; touch-action: manipulation; user-select: none; transition: border-color .15s ease, background-color .15s ease, opacity .15s ease, transform .15s ease; }

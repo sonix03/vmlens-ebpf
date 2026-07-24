@@ -23,8 +23,8 @@ const minCanvasHeight = 2000
 const minZoom = 0.15
 const maxZoom = 2.5
 const requestAnimationWindowMs = 4000
-const tcpConnectionWindowMs = 60_000
-const datagramConnectionWindowMs = 12_000
+const tcpConnectionWindowMs = 30_000
+const datagramConnectionWindowMs = 15_000
 const edgePulseWindowMs = 900
 
 type Point = { x: number; y: number }
@@ -44,6 +44,8 @@ type VisualRelationship = {
   pulseReverseUntil: number
   activeForwardUntil: number
   activeReverseUntil: number
+  failedForwardUntil: number
+  failedReverseUntil: number
   weight: number
   totalBytes: number
   requestCount: number
@@ -84,6 +86,18 @@ function activeUntil(edge: GraphEdge) {
   const parsedActiveUntil = Date.parse(edge.active_until)
   if (Number.isFinite(parsedActiveUntil)) return parsedActiveUntil
   return edge.active ? Date.parse(edge.last_observed_at) + requestAnimationWindowMs : 0
+}
+
+function failedUntil(edge: GraphEdge) {
+  const parsedFailedUntil = Date.parse(edge.failed_until || '')
+  if (Number.isFinite(parsedFailedUntil)) return parsedFailedUntil
+  const parsedLastError = Date.parse(edge.last_error_at || '')
+  if (Number.isFinite(parsedLastError)) return parsedLastError + requestAnimationWindowMs
+  if (edge.failed) {
+    const observedAt = Date.parse(edge.last_observed_at || edge.last_seen)
+    return Number.isFinite(observedAt) ? observedAt + requestAnimationWindowMs : 0
+  }
+  return 0
 }
 
 function connectionUntil(edge: GraphEdge) {
@@ -307,6 +321,8 @@ export function GraphView({ graph, onNodeSelect }: Props) {
         pulseReverseUntil: 0,
         activeForwardUntil: 0,
         activeReverseUntil: 0,
+        failedForwardUntil: 0,
+        failedReverseUntil: 0,
         weight: 1,
         totalBytes: 0,
         requestCount: 0,
@@ -317,6 +333,7 @@ export function GraphView({ graph, onNodeSelect }: Props) {
       const isReachability = edge.kind === 'reachability' || edge.reachable === true || edge.protocol === 'icmp'
       const animates = isRequestEdge(edge)
       const until = isReachability || !animates ? 0 : activeUntil(edge)
+      const failedUntilValue = isReachability || (edge.error_count ?? 0) <= 0 ? 0 : failedUntil(edge)
       const connectedUntil = Math.max(connectionUntil(edge), until)
       const freshUntil = pulseUntil(edge)
       current.hasTraffic = current.hasTraffic || !isReachability
@@ -329,11 +346,13 @@ export function GraphView({ graph, onNodeSelect }: Props) {
         current.connectionForwardUntil = Math.max(current.connectionForwardUntil, connectedUntil)
         current.pulseForwardUntil = Math.max(current.pulseForwardUntil, freshUntil)
         current.activeForwardUntil = Math.max(current.activeForwardUntil, until)
+        current.failedForwardUntil = Math.max(current.failedForwardUntil, failedUntilValue)
       } else {
         current.hasReverse = true
         current.connectionReverseUntil = Math.max(current.connectionReverseUntil, connectedUntil)
         current.pulseReverseUntil = Math.max(current.pulseReverseUntil, freshUntil)
         current.activeReverseUntil = Math.max(current.activeReverseUntil, until)
+        current.failedReverseUntil = Math.max(current.failedReverseUntil, failedUntilValue)
       }
       if (!isReachability) {
         current.weight = Math.max(current.weight, edge.weight)
@@ -349,13 +368,16 @@ export function GraphView({ graph, onNodeSelect }: Props) {
       const source = nodeByID.get(relationship.source)
       const target = nodeByID.get(relationship.target)
       if (!source || !target) return []
-      const activeForward = relationship.activeForwardUntil > clock
-      const activeReverse = relationship.activeReverseUntil > clock
+      const failedForward = relationship.failedForwardUntil > clock
+      const failedReverse = relationship.failedReverseUntil > clock
+      const failed = failedForward || failedReverse
+      const activeForward = relationship.activeForwardUntil > clock && !failedForward
+      const activeReverse = relationship.activeReverseUntil > clock && !failedReverse
       const active = activeForward || activeReverse
       const connectionForward = relationship.connectionForwardUntil > clock
       const connectionReverse = relationship.connectionReverseUntil > clock
-      const connected = connectionForward || connectionReverse || active
-      const fresh = relationship.pulseForwardUntil > clock || relationship.pulseReverseUntil > clock
+      const connected = connectionForward || connectionReverse || active || failed
+      const fresh = relationship.pulseForwardUntil > clock || relationship.pulseReverseUntil > clock || failed
       const reachabilityOnly = relationship.hasReachability && !relationship.hasTraffic
       const start = edgePoint(source.center, target.center)
       const end = edgePoint(target.center, source.center)
@@ -379,6 +401,8 @@ export function GraphView({ graph, onNodeSelect }: Props) {
         reachabilityOnly,
         activeForward,
         activeReverse,
+        failedForward,
+        failedReverse,
         connectionForward,
         connectionReverse,
         hasForward: connected ? relationship.hasForward : false,
@@ -427,6 +451,9 @@ export function GraphView({ graph, onNodeSelect }: Props) {
           <marker id="edge-arrow-reachability" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
             <path d="M 1 1 L 9 5 L 1 9 z" fill="#79add1" />
           </marker>
+          <marker id="edge-arrow-failed" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
+            <path d="M 1 1 L 9 5 L 1 9 z" fill="#d89b45" />
+          </marker>
         </defs>
         {edges.map((edge) => edge.connected ? <path
           key={edge.id}
@@ -449,6 +476,20 @@ export function GraphView({ graph, onNodeSelect }: Props) {
           d={edge.path}
           markerStart="url(#edge-arrow-active)"
           style={{ strokeWidth: edge.width }}
+        /> : null)}
+        {edges.map((edge) => edge.failedForward ? <path
+          key={`${edge.id}-forward-failed`}
+          className="graph-edge graph-edge-failed graph-edge-forward"
+          d={edge.path}
+          markerEnd="url(#edge-arrow-failed)"
+          style={{ strokeWidth: Math.max(edge.width, 2.2) }}
+        /> : null)}
+        {edges.map((edge) => edge.failedReverse ? <path
+          key={`${edge.id}-reverse-failed`}
+          className="graph-edge graph-edge-failed graph-edge-reverse"
+          d={edge.path}
+          markerStart="url(#edge-arrow-failed)"
+          style={{ strokeWidth: Math.max(edge.width, 2.2) }}
         /> : null)}
         {edges.map((edge) => edge.connected && edge.label ? <text
           key={`${edge.id}-label`}
