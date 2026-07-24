@@ -13,6 +13,7 @@ struct flow_event {
     __u8 protocol;
     __u8 direction;
     __u32 packets;
+    __u32 error_count;
 } __attribute__((packed));
 
 struct {

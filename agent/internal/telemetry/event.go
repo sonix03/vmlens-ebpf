@@ -15,6 +15,7 @@ type FlowEvent struct {
 	Packets         int64     `json:"packets"`
 	ConnectionCount int64     `json:"connection_count"`
 	RequestCount    int64     `json:"request_count"`
+	ErrorCount      int64     `json:"error_count"`
 	FirstSeen       time.Time `json:"first_seen"`
 	LastSeen        time.Time `json:"last_seen"`
 	Interface       string    `json:"interface"`

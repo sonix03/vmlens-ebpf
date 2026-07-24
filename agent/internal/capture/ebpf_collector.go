@@ -31,6 +31,21 @@ type rawFlowEvent struct {
 	Protocol    uint8
 	Direction   uint8
 	Packets     uint32
+	ErrorCount  uint32
+}
+
+type legacyRawFlowEvent struct {
+	TimestampNS uint64
+	Bytes       uint64
+	SrcAddr     [16]byte
+	DstAddr     [16]byte
+	Connections uint32
+	SrcPort     uint16
+	DstPort     uint16
+	Family      uint16
+	Protocol    uint8
+	Direction   uint8
+	Packets     uint32
 }
 
 type EBPFOptions struct {
@@ -207,8 +222,8 @@ func (c *EBPFCollector) Run(ctx context.Context) (<-chan telemetry.FlowEvent, <-
 				}
 				return
 			}
-			var raw rawFlowEvent
-			if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &raw); err != nil {
+			raw, err := decodeRawFlowEvent(record.RawSample)
+			if err != nil {
 				errorsChannel <- err
 				continue
 			}
@@ -216,6 +231,33 @@ func (c *EBPFCollector) Run(ctx context.Context) (<-chan telemetry.FlowEvent, <-
 		}
 	}()
 	return events, errorsChannel
+}
+
+func decodeRawFlowEvent(sample []byte) (rawFlowEvent, error) {
+	var raw rawFlowEvent
+	if len(sample) >= binary.Size(raw) {
+		return raw, binary.Read(bytes.NewReader(sample), binary.LittleEndian, &raw)
+	}
+	var legacy legacyRawFlowEvent
+	if len(sample) == binary.Size(legacy) {
+		if err := binary.Read(bytes.NewReader(sample), binary.LittleEndian, &legacy); err != nil {
+			return rawFlowEvent{}, err
+		}
+		return rawFlowEvent{
+			TimestampNS: legacy.TimestampNS,
+			Bytes:       legacy.Bytes,
+			SrcAddr:     legacy.SrcAddr,
+			DstAddr:     legacy.DstAddr,
+			Connections: legacy.Connections,
+			SrcPort:     legacy.SrcPort,
+			DstPort:     legacy.DstPort,
+			Family:      legacy.Family,
+			Protocol:    legacy.Protocol,
+			Direction:   legacy.Direction,
+			Packets:     legacy.Packets,
+		}, nil
+	}
+	return rawFlowEvent{}, fmt.Errorf("unexpected eBPF event size %d", len(sample))
 }
 
 func (c *EBPFCollector) convert(raw rawFlowEvent) telemetry.FlowEvent {
@@ -241,7 +283,7 @@ func (c *EBPFCollector) convert(raw rawFlowEvent) telemetry.FlowEvent {
 		AgentID: c.registration.AgentID, SrcIP: sourceIP, DstIP: destinationIP,
 		SrcPort: int(raw.SrcPort), DstPort: int(raw.DstPort), Protocol: protocol,
 		Direction: direction, ConnectionCount: int64(raw.Connections), RequestCount: requestCount(protocol, direction, raw),
-		Packets: int64(raw.Packets), FirstSeen: now, LastSeen: now,
+		ErrorCount: int64(raw.ErrorCount), Packets: int64(raw.Packets), FirstSeen: now, LastSeen: now,
 	}
 	if direction == "ingress" {
 		event.BytesReceived = int64(raw.Bytes)
@@ -266,6 +308,9 @@ func (c *EBPFCollector) defaultInterfaceName() string {
 }
 
 func requestCount(protocol, direction string, raw rawFlowEvent) int64 {
+	if raw.ErrorCount > 0 {
+		return 0
+	}
 	if raw.Connections > 0 {
 		return int64(raw.Connections)
 	}

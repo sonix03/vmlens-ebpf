@@ -104,6 +104,7 @@ static __always_inline int emit_tc_packet(struct __sk_buff *skb, __u8 direction)
     event->direction = direction;
     event->packets = 1;
     event->connections = (protocol == IPPROTO_TCP_VALUE && (tcp_flags & TCP_SYN) && !(tcp_flags & TCP_ACK)) ? 1 : 0;
+    event->error_count = (protocol == IPPROTO_TCP_VALUE && (tcp_flags & TCP_RST)) ? 1 : 0;
     fill_tc_addresses(event, direction, src_addr, dst_addr, src_port, dst_port);
     bpf_ringbuf_submit(event, 0);
     return TC_ACT_OK;

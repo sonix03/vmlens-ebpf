@@ -35,6 +35,9 @@ func TestRequestCountUsesConnectionsAndUDPMessages(t *testing.T) {
 	if got := requestCount("tcp", "egress", rawFlowEvent{Connections: 3}); got != 3 {
 		t.Fatalf("tcp request count = %d, want 3", got)
 	}
+	if got := requestCount("tcp", "egress", rawFlowEvent{ErrorCount: 1}); got != 0 {
+		t.Fatalf("tcp rst request count = %d, want 0", got)
+	}
 	if got := requestCount("udp", "egress", rawFlowEvent{Bytes: 128}); got != 1 {
 		t.Fatalf("udp request count = %d, want 1", got)
 	}

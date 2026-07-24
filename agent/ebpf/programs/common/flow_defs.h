@@ -30,6 +30,7 @@
 
 #define TCP_FLAGS_OFFSET 13
 #define TCP_SYN 0x02
+#define TCP_RST 0x04
 #define TCP_ACK 0x10
 
 #define TC_ACT_OK 0
