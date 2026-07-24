@@ -16,13 +16,14 @@ import (
 )
 
 type Handlers struct {
-	Pool     *pgxpool.Pool
-	Agents   *service.AgentService
-	VMs      *service.VMService
-	Flows    *service.FlowService
-	Graph    *service.GraphService
-	Stats    *service.StatsService
-	DeepFlow *service.DeepFlowService
+	Pool        *pgxpool.Pool
+	Agents      *service.AgentService
+	VMs         *service.VMService
+	Flows       *service.FlowService
+	Connections *service.ConnectionService
+	Graph       *service.GraphService
+	Stats       *service.StatsService
+	DeepFlow    *service.DeepFlowService
 }
 
 func (h *Handlers) Root(w http.ResponseWriter, r *http.Request) {
@@ -106,6 +107,30 @@ func (h *Handlers) IngestFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, result)
+}
+
+func (h *Handlers) ListConnectionTargets(w http.ResponseWriter, r *http.Request) {
+	agentID := strings.TrimSpace(r.URL.Query().Get("agent_id"))
+	result, err := h.Connections.Targets(r.Context(), agentID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handlers) RecordConnectionProbe(w http.ResponseWriter, r *http.Request) {
+	var request model.ConnectionProbeEvent
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.Connections.RecordProbe(r.Context(), request); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "ok"})
 }
 
 func (h *Handlers) ListFlows(w http.ResponseWriter, r *http.Request) {

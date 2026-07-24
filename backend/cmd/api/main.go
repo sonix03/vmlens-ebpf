@@ -50,10 +50,11 @@ func run() error {
 		IncludeIdle:   cfg.Graph.IncludeIdle,
 	}
 	flows := service.NewFlowService(pool, classifier, hub, graphVisibility)
+	connections := service.NewConnectionService(pool, hub)
 	graph := service.NewGraphService(pool, vms, cfg.FlowActiveWindow, graphVisibility)
 	stats := service.NewStatsService(pool)
 	deepFlow := service.NewDeepFlowService(cfg.DeepFlow, vms)
-	handlers := &apihttp.Handlers{Pool: pool, Agents: agents, VMs: vms, Flows: flows, Graph: graph, Stats: stats, DeepFlow: deepFlow}
+	handlers := &apihttp.Handlers{Pool: pool, Agents: agents, VMs: vms, Flows: flows, Connections: connections, Graph: graph, Stats: stats, DeepFlow: deepFlow}
 
 	server := &http.Server{Addr: cfg.ListenAddr, Handler: apihttp.Routes(handlers, hub, cfg.AllowedOrigins), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 	serverErrors := make(chan error, 1)

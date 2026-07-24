@@ -57,7 +57,7 @@ func Load() (Config, error) {
 		StatusSweepPeriod:         30 * time.Second,
 		VMDeleteAfter:             0,
 		Graph: GraphConfig{
-			ExcludedPorts: intCSV(env("GRAPH_EXCLUDED_PORTS", "22,53,123,8080,18080,18081,20033,20035,30033,30035")),
+			ExcludedPorts: intCSV(env("GRAPH_EXCLUDED_PORTS", "22,53,123,8080,18080,18081,18082,20033,20035,30033,30035")),
 			AllowedPorts:  intCSV(env("GRAPH_ALLOWED_PORTS", "")),
 			ExcludedIPs:   csv(env("GRAPH_EXCLUDED_IPS", "10.20.20.125,127.0.0.1")),
 			IncludeIdle:   envBool("GRAPH_INCLUDE_IDLE", true),
@@ -76,7 +76,7 @@ func Load() (Config, error) {
 			MaskExternalIPs:            envBool("DEEPFLOW_MASK_EXTERNAL_IPS", false),
 			RequireInventoryFilter:     envBool("DEEPFLOW_REQUIRE_INVENTORY_FILTER", true),
 			ExcludedIPs:                csv(env("DEEPFLOW_EXCLUDED_IPS", "10.20.20.125,127.0.0.1,127.0.0.53")),
-			ExcludedPorts:              intCSV(env("DEEPFLOW_EXCLUDED_PORTS", "22,53,123,8080,18080,18081,20033,20035,30033,30035")),
+			ExcludedPorts:              intCSV(env("DEEPFLOW_EXCLUDED_PORTS", "22,53,123,8080,18080,18081,18082,20033,20035,30033,30035")),
 			ExcludedL7ResourcePrefixes: csv(env("DEEPFLOW_EXCLUDED_L7_RESOURCE_PREFIXES", "/trident.,trident.,/api/agents/,/api/flows/ingest,/health")),
 		},
 	}

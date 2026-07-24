@@ -17,6 +17,8 @@ func Routes(handlers *Handlers, hub *realtime.Hub, allowedOrigins []string) http
 	mux.HandleFunc("GET /api/flows", handlers.ListFlows)
 	mux.HandleFunc("GET /api/internal/activity", handlers.ListInternalActivity)
 	mux.HandleFunc("POST /api/flows/ingest", handlers.IngestFlow)
+	mux.HandleFunc("GET /api/connections/targets", handlers.ListConnectionTargets)
+	mux.HandleFunc("POST /api/connections/probe", handlers.RecordConnectionProbe)
 	mux.HandleFunc("GET /api/graph", handlers.GetGraph)
 	mux.HandleFunc("GET /api/deepflow/graph", handlers.GetDeepFlowGraph)
 	mux.HandleFunc("GET /api/deepflow/raw/flows", handlers.GetDeepFlowRawFlows)
