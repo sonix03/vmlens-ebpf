@@ -1,4 +1,4 @@
-# VMLens legacy VM inventory.
+# VMLens fallback VM inventory.
 #
 # Prefer configs/local.env and VMLENS_VM_PROFILES for new setups.
 #

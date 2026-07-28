@@ -11,33 +11,31 @@ fi
 usage() {
   cat <<EOF
 Usage:
-  $0 list
-  $0 show <vm-alias-or-host>
-  $0 start|stop|restart|status <vm-alias-or-host> [ssh-key|agent|none]
-  $0 start-all|stop-all|restart-all|status-all
-  $0 forget-host <vm-alias-or-host>
+  bash scripts/vmlens-tunnel.sh list
+  bash scripts/vmlens-tunnel.sh show <vm-alias-or-host>
+  bash scripts/vmlens-tunnel.sh start|stop|restart|status <vm-alias-or-host> [ssh-key|agent|none]
+  bash scripts/vmlens-tunnel.sh start-all|stop-all|restart-all|status-all
+  bash scripts/vmlens-tunnel.sh forget-host <vm-alias-or-host>
+
+What it opens:
+  remote ${VMLENS_REMOTE_BACKEND:-127.0.0.1:18080} -> local ${VMLENS_LOCAL_BACKEND:-127.0.0.1:8080}
 
 Config:
   VMLENS_CONFIG=${config_file}
-
-Env override:
   VMLENS_SSH_USER=ubuntu
   VMLENS_SSH_KEY=~/.ssh/id_ed25519_vmlens | agent | none
+  VMLENS_SSH_PROXY_JUMP=
   VMLENS_LOCAL_BACKEND=127.0.0.1:8080
   VMLENS_REMOTE_BACKEND=127.0.0.1:18080
-  VMLENS_TUNNEL_DEEPFLOW=true
-  VMLENS_LOCAL_DEEPFLOW_CONTROLLER=127.0.0.1:30035
-  VMLENS_REMOTE_DEEPFLOW_CONTROLLER=127.0.0.1:30035
-  VMLENS_LOCAL_DEEPFLOW_INGESTER=127.0.0.1:30033
-  VMLENS_REMOTE_DEEPFLOW_INGESTER=127.0.0.1:30033
   VMLENS_VM_PROFILES="testing_a_1 testing_a_2"
-  VMLENS_VM_INVENTORY=configs/vms.local  # optional legacy file
+  VMLENS_VM_INVENTORY=configs/vms.local
 EOF
 }
 
 action="${1:-}"
-vm_host="${2:-}"
+selector="${2:-}"
 key_arg="${3:-}"
+
 if [[ -z "${action}" ]]; then
   usage >&2
   exit 1
@@ -52,9 +50,9 @@ expand_path() {
   esac
 }
 
-is_disabled_key() {
+is_agent_key() {
   case "${1:-}" in
-    ""|"-"|"none"|"agent"|"ssh-agent") return 0 ;;
+    ""|"-"|"agent"|"none"|"ssh-agent") return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -69,54 +67,6 @@ discover_default_key() {
   done
   return 1
 }
-
-prepare_ssh_key() {
-  local requested="${1:-}"
-  if is_disabled_key "${requested}"; then
-    printf '%s\n' "agent"
-    return 0
-  fi
-
-  local key_path
-  key_path="$(expand_path "${requested}")"
-  if [[ ! -r "${key_path}" ]]; then
-    echo "SSH key not found: ${requested}" >&2
-    echo "Set VMLENS_SSH_KEY, SSH_KEY, or per-VM VMLENS_VM_<PROFILE>_SSH_KEY in ${config_file}" >&2
-    return 1
-  fi
-
-  if [[ "${key_path}" == /mnt/c/* ]]; then
-    mkdir -p "${key_state_dir}"
-    install -m 0600 "${key_path}" "${key_state_dir}/id_ed25519_vmlens"
-    key_path="${key_state_dir}/id_ed25519_vmlens"
-  fi
-
-  printf '%s\n' "${key_path}"
-}
-
-default_ssh_user="${SSH_USER:-${VMLENS_SSH_USER:-ubuntu}}"
-default_ssh_key="${SSH_KEY:-${VMLENS_SSH_KEY:-}}"
-if [[ -z "${default_ssh_key}" ]]; then
-  default_ssh_key="$(discover_default_key || true)"
-fi
-default_ssh_key="${default_ssh_key:-~/.ssh/id_ed25519_vmlens}"
-default_local_backend="${LOCAL_BACKEND:-${VMLENS_LOCAL_BACKEND:-127.0.0.1:8080}}"
-default_remote_backend="${REMOTE_BACKEND:-${VMLENS_REMOTE_BACKEND:-127.0.0.1:18080}}"
-default_tunnel_deepflow="${VMLENS_TUNNEL_DEEPFLOW:-true}"
-default_local_deepflow_controller="${LOCAL_DEEPFLOW_CONTROLLER:-${VMLENS_LOCAL_DEEPFLOW_CONTROLLER:-127.0.0.1:30035}}"
-default_remote_deepflow_controller="${REMOTE_DEEPFLOW_CONTROLLER:-${VMLENS_REMOTE_DEEPFLOW_CONTROLLER:-127.0.0.1:30035}}"
-default_local_deepflow_ingester="${LOCAL_DEEPFLOW_INGESTER:-${VMLENS_LOCAL_DEEPFLOW_INGESTER:-127.0.0.1:30033}}"
-default_remote_deepflow_ingester="${REMOTE_DEEPFLOW_INGESTER:-${VMLENS_REMOTE_DEEPFLOW_INGESTER:-127.0.0.1:30033}}"
-state_dir="$(expand_path "${VMLENS_TUNNEL_STATE_DIR:-${HOME}/.vmlens/tunnels}")"
-key_state_dir="$(expand_path "${VMLENS_KEY_STATE_DIR:-${HOME}/.vmlens/keys}")"
-vm_profiles="${VMLENS_VM_PROFILES:-}"
-vm_inventory="${VMLENS_VM_INVENTORY:-${repo_dir}/configs/vms.local}"
-if [[ "${vm_inventory}" != /* ]]; then
-  vm_inventory="${repo_dir}/${vm_inventory}"
-fi
-if [[ -z "${vm_profiles}" && ! -f "${vm_inventory}" && -f "${repo_dir}/configs/vms.example" ]]; then
-  vm_inventory="${repo_dir}/configs/vms.example"
-fi
 
 profile_env_name() {
   local profile="$1"
@@ -138,77 +88,118 @@ profile_value() {
   env_value "VMLENS_VM_${normalized}_${field}"
 }
 
-has_env_profiles() {
-  [[ -n "${vm_profiles// }" ]]
-}
-
-is_true() {
-  case "${1:-}" in
-    true|TRUE|1|yes|YES|y|Y|on|ON) return 0 ;;
-    *) return 1 ;;
-  esac
-}
+default_ssh_user="${SSH_USER:-${VMLENS_SSH_USER:-ubuntu}}"
+default_ssh_key="${SSH_KEY:-${VMLENS_SSH_KEY:-}}"
+default_ssh_proxy_jump="${SSH_PROXY_JUMP:-${VMLENS_SSH_PROXY_JUMP:-}}"
+if [[ -z "${default_ssh_key}" ]]; then
+  default_ssh_key="$(discover_default_key || true)"
+fi
+default_ssh_key="${default_ssh_key:-~/.ssh/id_ed25519_vmlens}"
+default_local_backend="${LOCAL_BACKEND:-${VMLENS_LOCAL_BACKEND:-127.0.0.1:8080}}"
+default_remote_backend="${REMOTE_BACKEND:-${VMLENS_REMOTE_BACKEND:-127.0.0.1:18080}}"
+state_dir="$(expand_path "${VMLENS_TUNNEL_STATE_DIR:-${HOME}/.vmlens/tunnels}")"
+key_state_dir="$(expand_path "${VMLENS_KEY_STATE_DIR:-${HOME}/.vmlens/keys}")"
+vm_profiles="${VMLENS_VM_PROFILES:-}"
+vm_inventory="${VMLENS_VM_INVENTORY:-${repo_dir}/configs/vms.local}"
+if [[ "${vm_inventory}" != /* ]]; then
+  vm_inventory="${repo_dir}/${vm_inventory}"
+fi
+if [[ -z "${vm_profiles// }" && ! -f "${vm_inventory}" && -f "${repo_dir}/configs/vms.example" ]]; then
+  vm_inventory="${repo_dir}/configs/vms.example"
+fi
 
 load_defaults() {
   vm_alias="${1:-}"
   vm_host="${1:-}"
   ssh_user="${default_ssh_user}"
   ssh_key="${default_ssh_key}"
+  ssh_proxy_jump="${default_ssh_proxy_jump}"
   local_backend="${default_local_backend}"
   remote_backend="${default_remote_backend}"
-  tunnel_deepflow="${default_tunnel_deepflow}"
-  local_deepflow_controller="${default_local_deepflow_controller}"
-  remote_deepflow_controller="${default_remote_deepflow_controller}"
-  local_deepflow_ingester="${default_local_deepflow_ingester}"
-  remote_deepflow_ingester="${default_remote_deepflow_ingester}"
 }
 
 apply_profile() {
   local profile="$1"
-  local alias host user key remote local deepflow df_remote_controller df_local_controller df_remote_ingester df_local_ingester
+  local alias host user key proxy_jump remote local
   alias="$(profile_value "${profile}" "ALIAS")"
   host="$(profile_value "${profile}" "HOST")"
   user="$(profile_value "${profile}" "SSH_USER")"
   key="$(profile_value "${profile}" "SSH_KEY")"
+  proxy_jump="$(profile_value "${profile}" "SSH_PROXY_JUMP")"
   remote="$(profile_value "${profile}" "REMOTE_BACKEND")"
   local="$(profile_value "${profile}" "LOCAL_BACKEND")"
-  deepflow="$(profile_value "${profile}" "TUNNEL_DEEPFLOW")"
-  df_remote_controller="$(profile_value "${profile}" "REMOTE_DEEPFLOW_CONTROLLER")"
-  df_local_controller="$(profile_value "${profile}" "LOCAL_DEEPFLOW_CONTROLLER")"
-  df_remote_ingester="$(profile_value "${profile}" "REMOTE_DEEPFLOW_INGESTER")"
-  df_local_ingester="$(profile_value "${profile}" "LOCAL_DEEPFLOW_INGESTER")"
 
   vm_alias="${alias:-${profile}}"
   vm_host="${host:-${vm_alias}}"
   [[ -n "${user:-}" && "${user}" != "-" ]] && ssh_user="${user}"
   [[ -n "${key:-}" && "${key}" != "-" ]] && ssh_key="${key}"
+  [[ -n "${proxy_jump:-}" && "${proxy_jump}" != "-" ]] && ssh_proxy_jump="${proxy_jump}"
   [[ -n "${remote:-}" && "${remote}" != "-" ]] && remote_backend="${remote}"
   [[ -n "${local:-}" && "${local}" != "-" ]] && local_backend="${local}"
-  [[ -n "${deepflow:-}" && "${deepflow}" != "-" ]] && tunnel_deepflow="${deepflow}"
-  [[ -n "${df_remote_controller:-}" && "${df_remote_controller}" != "-" ]] && remote_deepflow_controller="${df_remote_controller}"
-  [[ -n "${df_local_controller:-}" && "${df_local_controller}" != "-" ]] && local_deepflow_controller="${df_local_controller}"
-  [[ -n "${df_remote_ingester:-}" && "${df_remote_ingester}" != "-" ]] && remote_deepflow_ingester="${df_remote_ingester}"
-  [[ -n "${df_local_ingester:-}" && "${df_local_ingester}" != "-" ]] && local_deepflow_ingester="${df_local_ingester}"
   return 0
 }
 
-print_vm_row() {
-  local selector="$1"
-  resolve_vm "${selector}"
-  local display_key
-  if is_disabled_key "${ssh_key}"; then
-    display_key="agent"
-  else
-    display_key="$(expand_path "${ssh_key}")"
+has_env_profiles() {
+  [[ -n "${vm_profiles// }" ]]
+}
+
+resolve_vm() {
+  local query="$1"
+  load_defaults "${query}"
+
+  if has_env_profiles; then
+    local profile alias host
+    for profile in ${vm_profiles}; do
+      alias="$(profile_value "${profile}" "ALIAS")"
+      host="$(profile_value "${profile}" "HOST")"
+      if [[ "${query}" == "${profile}" || "${query}" == "${alias}" || "${query}" == "${host}" ]]; then
+        apply_profile "${profile}"
+        return
+      fi
+    done
+    return
   fi
-  printf '%-16s %-16s %-10s %-58s %-22s %-22s %-9s\n' \
-    "${vm_alias}" \
-    "${vm_host}" \
-    "${ssh_user}" \
-    "${display_key}" \
-    "${remote_backend}" \
-    "${local_backend}" \
-    "${tunnel_deepflow}"
+
+  if [[ -f "${vm_inventory}" ]]; then
+    local alias host user key remote local proxy_jump
+    while IFS='|' read -r alias host user key remote local proxy_jump; do
+      [[ -z "${alias}" || "${alias}" == \#* ]] && continue
+      if [[ "${query}" == "${alias}" || "${query}" == "${host}" ]]; then
+        vm_alias="${alias}"
+        vm_host="${host}"
+        [[ -n "${user:-}" && "${user}" != "-" ]] && ssh_user="${user}"
+        [[ -n "${key:-}" && "${key}" != "-" ]] && ssh_key="${key}"
+        [[ -n "${remote:-}" && "${remote}" != "-" ]] && remote_backend="${remote}"
+        [[ -n "${local:-}" && "${local}" != "-" ]] && local_backend="${local}"
+        [[ -n "${proxy_jump:-}" && "${proxy_jump}" != "-" ]] && ssh_proxy_jump="${proxy_jump}"
+        return
+      fi
+    done <"${vm_inventory}"
+  fi
+}
+
+prepare_ssh_key() {
+  local requested="${1:-}"
+  if is_agent_key "${requested}"; then
+    printf '%s\n' "agent"
+    return 0
+  fi
+
+  local key_path
+  key_path="$(expand_path "${requested}")"
+  if [[ ! -r "${key_path}" ]]; then
+    echo "SSH key not found: ${requested}" >&2
+    echo "Set VMLENS_SSH_KEY, SSH_KEY, or per-VM VMLENS_VM_<PROFILE>_SSH_KEY in ${config_file}" >&2
+    return 1
+  fi
+
+  if [[ "${key_path}" == /mnt/c/* ]]; then
+    mkdir -p "${key_state_dir}"
+    install -m 0600 "${key_path}" "${key_state_dir}/id_ed25519_vmlens"
+    key_path="${key_state_dir}/id_ed25519_vmlens"
+  fi
+
+  printf '%s\n' "${key_path}"
 }
 
 for_each_vm() {
@@ -218,13 +209,14 @@ for_each_vm() {
     for profile in ${vm_profiles}; do
       "${callback}" "${profile}"
     done
-    return 0
+    return
   fi
 
   if [[ ! -f "${vm_inventory}" ]]; then
     echo "VM inventory not found: ${vm_inventory}" >&2
     return 1
   fi
+
   local alias host user key remote local
   while IFS='|' read -r alias host user key remote local; do
     [[ -z "${alias}" || "${alias}" == \#* ]] && continue
@@ -232,54 +224,28 @@ for_each_vm() {
   done <"${vm_inventory}"
 }
 
-list_vms() {
-  printf '%-16s %-16s %-10s %-58s %-22s %-22s %-9s\n' "ALIAS" "HOST" "USER" "KEY" "REMOTE_BACKEND" "LOCAL_BACKEND" "DEEPFLOW"
-  for_each_vm print_vm_row
+print_vm_row() {
+  resolve_vm "$1"
+  local display_key
+  if is_agent_key "${ssh_key}"; then
+    display_key="agent"
+  else
+    display_key="$(expand_path "${ssh_key}")"
+  fi
+  printf '%-16s %-16s %-10s %-58s %-18s %-22s %-22s\n' \
+    "${vm_alias}" "${vm_host}" "${ssh_user}" "${display_key}" "${ssh_proxy_jump:-direct}" "${remote_backend}" "${local_backend}"
 }
 
-resolve_vm() {
-  local selector="$1"
-  load_defaults "${selector}"
-
-  if has_env_profiles; then
-    local profile alias host
-    for profile in ${vm_profiles}; do
-      alias="$(profile_value "${profile}" "ALIAS")"
-      host="$(profile_value "${profile}" "HOST")"
-      if [[ "${selector}" == "${profile}" || "${selector}" == "${alias}" || "${selector}" == "${host}" ]]; then
-        apply_profile "${profile}"
-        return
-      fi
-    done
-    return
-  fi
-
-  if [[ -f "${vm_inventory}" ]]; then
-    while IFS='|' read -r alias host user key remote local; do
-      [[ -z "${alias}" || "${alias}" == \#* ]] && continue
-      if [[ "${selector}" == "${alias}" || "${selector}" == "${host}" ]]; then
-        vm_alias="${alias}"
-        vm_host="${host}"
-        [[ -n "${user:-}" && "${user}" != "-" ]] && ssh_user="${user}"
-        [[ -n "${key:-}" && "${key}" != "-" ]] && ssh_key="${key}"
-        [[ -n "${remote:-}" && "${remote}" != "-" ]] && remote_backend="${remote}"
-        [[ -n "${local:-}" && "${local}" != "-" ]] && local_backend="${local}"
-        break
-      fi
-    done <"${vm_inventory}"
-  fi
+list_vms() {
+  printf '%-16s %-16s %-10s %-58s %-18s %-22s %-22s\n' "ALIAS" "HOST" "USER" "KEY" "PROXY_JUMP" "REMOTE_BACKEND" "LOCAL_BACKEND"
+  for_each_vm print_vm_row
 }
 
 run_for_all() {
   local sub_action="$1"
-  if ! has_env_profiles && [[ ! -f "${vm_inventory}" ]]; then
-    echo "VM inventory not found: ${vm_inventory}" >&2
-    exit 1
-  fi
   local failed=0
   run_one() {
-    local selector="$1"
-    resolve_vm "${selector}"
+    resolve_vm "$1"
     echo "==> ${sub_action} ${vm_alias} (${vm_host})"
     if ! VMLENS_CONFIG="${config_file}" bash "$0" "${sub_action}" "${vm_alias}"; then
       failed=1
@@ -290,9 +256,7 @@ run_for_all() {
 }
 
 forget_known_host() {
-  local selector="$1"
-  resolve_vm "${selector}"
-
+  resolve_vm "$1"
   local known_hosts_file="${HOME}/.ssh/known_hosts"
   if [[ ! -f "${known_hosts_file}" ]]; then
     echo "known_hosts not found: ${known_hosts_file}"
@@ -300,7 +264,7 @@ forget_known_host() {
   fi
 
   local entry seen_entries=" "
-  for entry in "${selector}" "${vm_host}" "${vm_alias}"; do
+  for entry in "$1" "${vm_host}" "${vm_alias}"; do
     [[ -z "${entry}" ]] && continue
     if [[ "${seen_entries}" == *" ${entry} "* ]]; then
       continue
@@ -315,20 +279,14 @@ forget_known_host() {
 case "${action}" in
   list) list_vms; exit $? ;;
   show)
-    if [[ -z "${vm_host}" ]]; then
-      usage >&2
-      exit 1
-    fi
-    printf '%-16s %-16s %-10s %-58s %-22s %-22s %-9s\n' "ALIAS" "HOST" "USER" "KEY" "REMOTE_BACKEND" "LOCAL_BACKEND" "DEEPFLOW"
-    print_vm_row "${vm_host}"
+    [[ -n "${selector}" ]] || { usage >&2; exit 1; }
+    printf '%-16s %-16s %-10s %-58s %-18s %-22s %-22s\n' "ALIAS" "HOST" "USER" "KEY" "PROXY_JUMP" "REMOTE_BACKEND" "LOCAL_BACKEND"
+    print_vm_row "${selector}"
     exit $?
     ;;
   forget-host)
-    if [[ -z "${vm_host}" ]]; then
-      usage >&2
-      exit 1
-    fi
-    forget_known_host "${vm_host}"
+    [[ -n "${selector}" ]] || { usage >&2; exit 1; }
+    forget_known_host "${selector}"
     exit 0
     ;;
   start-all) run_for_all start; exit $? ;;
@@ -337,18 +295,21 @@ case "${action}" in
   status-all) run_for_all status; exit $? ;;
 esac
 
-if [[ -z "${vm_host}" ]]; then
-  usage >&2
-  exit 1
-fi
+[[ -n "${selector}" ]] || { usage >&2; exit 1; }
 
-resolve_vm "${vm_host}"
+resolve_vm "${selector}"
 if [[ -n "${key_arg}" ]]; then
   ssh_key="${key_arg}"
 fi
 ssh_key="$(prepare_ssh_key "${ssh_key}")"
+
+mkdir -p "${state_dir}"
 safe_host="${vm_host//[^A-Za-z0-9_.-]/_}"
 control_path="${state_dir}/${ssh_user}_${safe_host}.ctl"
+pid_path="${state_dir}/${ssh_user}_${safe_host}.pid"
+log_path="${state_dir}/${ssh_user}_${safe_host}.log"
+target="${ssh_user}@${vm_host}"
+uses_proxy=false
 
 ssh_common=(
   ssh
@@ -356,52 +317,126 @@ ssh_common=(
   -o ServerAliveInterval=30
   -o ServerAliveCountMax=3
   -o StrictHostKeyChecking=accept-new
-  -S "${control_path}"
 )
-if ! is_disabled_key "${ssh_key}"; then
+if [[ -z "${ssh_proxy_jump:-}" || "${ssh_proxy_jump}" == "-" ]]; then
+  ssh_common+=(-S "${control_path}")
+fi
+if ! is_agent_key "${ssh_key}"; then
   ssh_common+=(-i "${ssh_key}" -o IdentitiesOnly=yes)
 fi
+if [[ -n "${ssh_proxy_jump:-}" && "${ssh_proxy_jump}" != "-" ]]; then
+  uses_proxy=true
+  jump_target="${ssh_proxy_jump}"
+  if [[ "${jump_target}" != *@* ]]; then
+    jump_target="${ssh_user}@${jump_target}"
+  fi
+  proxy_command=(ssh -o StrictHostKeyChecking=accept-new)
+  if ! is_agent_key "${ssh_key}"; then
+    proxy_command+=(-i "${ssh_key}" -o IdentitiesOnly=yes)
+  fi
+  proxy_command+=(-W %h:%p "${jump_target}")
+  printf -v proxy_command_string "%q " "${proxy_command[@]}"
+  ssh_common+=(-o "ProxyCommand=${proxy_command_string% }")
+fi
 
-target="${ssh_user}@${vm_host}"
+find_tunnel_pids() {
+  ps -eo pid=,comm=,args= | while read -r pid command args; do
+    [[ "${command}" == "ssh" ]] || continue
+    case "${args}" in
+      *"-R ${remote_backend}:${local_backend}"*" ${target}"*)
+        printf '%s\n' "${pid}"
+        ;;
+    esac
+  done
+}
+
+pid_is_running() {
+  [[ -f "${pid_path}" ]] || return 1
+  local pid
+  pid="$(cat "${pid_path}" 2>/dev/null || true)"
+  [[ -n "${pid}" ]] || return 1
+  if kill -0 "${pid}" >/dev/null 2>&1; then
+    return 0
+  fi
+  pid="$(find_tunnel_pids | head -n 1)"
+  if [[ -n "${pid}" ]]; then
+    printf '%s\n' "${pid}" >"${pid_path}"
+    return 0
+  fi
+  rm -f "${pid_path}"
+  return 1
+}
 
 is_running() {
+  if [[ "${uses_proxy}" == "true" ]]; then
+    pid_is_running
+    return
+  fi
   "${ssh_common[@]}" -O check "${target}" >/dev/null 2>&1
 }
 
 start_tunnel() {
-  mkdir -p "${state_dir}"
   if is_running; then
-    echo "VMLens tunnel already running for ${vm_alias}: ${target}"
-    return
+    echo "Tunnel already running: ${vm_alias} ${target}"
+    return 0
   fi
-  local forwards=(
-    -R "${remote_backend}:${local_backend}"
-  )
-  local forward_summary=(
-    "${remote_backend} -> ${local_backend}"
-  )
-  if is_true "${tunnel_deepflow}"; then
-    forwards+=(
-      -R "${remote_deepflow_controller}:${local_deepflow_controller}"
-      -R "${remote_deepflow_ingester}:${local_deepflow_ingester}"
-    )
-    forward_summary+=(
-      "${remote_deepflow_controller} -> ${local_deepflow_controller}"
-      "${remote_deepflow_ingester} -> ${local_deepflow_ingester}"
-    )
+  rm -f "${control_path}" "${pid_path}" "${log_path}"
+  if [[ "${uses_proxy}" == "true" ]]; then
+    "${ssh_common[@]}" -fN -R "${remote_backend}:${local_backend}" "${target}" >"${log_path}" 2>&1
+    sleep 1
+    local pid
+    pid="$(find_tunnel_pids | head -n 1)"
+    if [[ -z "${pid}" ]]; then
+      echo "Tunnel failed: ${vm_alias} ${target}" >&2
+      sed -n '1,80p' "${log_path}" >&2 || true
+      return 1
+    fi
+    printf '%s\n' "${pid}" >"${pid_path}"
+  else
+    "${ssh_common[@]}" -M -fN -R "${remote_backend}:${local_backend}" "${target}"
   fi
-  "${ssh_common[@]}" -M -fN "${forwards[@]}" "${target}"
-  echo "VMLens tunnel started: ${vm_alias} ${target}"
-  printf '  %s\n' "${forward_summary[@]}"
+  echo "Tunnel started: ${vm_alias} ${target}"
+  echo "  ${remote_backend} -> ${local_backend}"
 }
 
 stop_tunnel() {
+  if [[ "${uses_proxy}" == "true" ]]; then
+    local pids
+    pids="$(find_tunnel_pids)"
+    if [[ -n "${pids}" ]]; then
+      local pid
+      while read -r pid; do
+        [[ -n "${pid}" ]] || continue
+        kill "${pid}" >/dev/null 2>&1 || true
+      done <<<"${pids}"
+      sleep 1
+      pids="$(find_tunnel_pids)"
+      while read -r pid; do
+        [[ -n "${pid}" ]] || continue
+        kill -9 "${pid}" >/dev/null 2>&1 || true
+      done <<<"${pids}"
+      rm -f "${pid_path}"
+      echo "Tunnel stopped: ${vm_alias} ${target}"
+      return 0
+    fi
+    if pid_is_running; then
+      pid="$(cat "${pid_path}")"
+      kill "${pid}" >/dev/null 2>&1 || true
+      rm -f "${pid_path}"
+      echo "Tunnel stopped: ${vm_alias} ${target}"
+      return 0
+    fi
+    rm -f "${pid_path}" "${control_path}"
+    echo "Tunnel already stopped: ${vm_alias} ${target}"
+    return 0
+  fi
   if is_running; then
     "${ssh_common[@]}" -O exit "${target}" >/dev/null
-    echo "VMLens tunnel stopped for ${vm_alias}: ${target}"
-  else
-    echo "VMLens tunnel is not running for ${vm_alias}: ${target}"
+    echo "Tunnel stopped: ${vm_alias} ${target}"
+    return 0
   fi
+  rm -f "${control_path}"
+  echo "Tunnel already stopped: ${vm_alias} ${target}"
 }
 
 case "${action}" in
