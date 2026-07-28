@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/vmlens/vmlens/agent/internal/metrics"
 	"github.com/vmlens/vmlens/agent/internal/telemetry"
 )
 
@@ -102,9 +103,9 @@ func (c *ICMPCollector) parse(packet []byte, sockaddr unix.Sockaddr) (telemetry.
 	if len(packet) < ethernetHeaderLen {
 		return telemetry.FlowEvent{}, false
 	}
-	direction := "ingress"
+	direction := metrics.DirectionIngress
 	if linkLayer, ok := sockaddr.(*unix.SockaddrLinklayer); ok && linkLayer.Pkttype == packetOutgoing {
-		direction = "egress"
+		direction = metrics.DirectionEgress
 	}
 
 	ethProtocol := binary.BigEndian.Uint16(packet[12:14])
@@ -129,7 +130,7 @@ func (c *ICMPCollector) parse(packet []byte, sockaddr unix.Sockaddr) (telemetry.
 		AgentID:      c.registration.AgentID,
 		SrcIP:        sourceIP,
 		DstIP:        destinationIP,
-		Protocol:     "icmp",
+		Protocol:     metrics.ProtocolICMP,
 		Direction:    direction,
 		Packets:      1,
 		RequestCount: 1,
@@ -137,11 +138,7 @@ func (c *ICMPCollector) parse(packet []byte, sockaddr unix.Sockaddr) (telemetry.
 		LastSeen:     now,
 		Interface:    c.ifaceName,
 	}
-	if direction == "ingress" {
-		event.BytesReceived = int64(len(packet))
-	} else {
-		event.BytesSent = int64(len(packet))
-	}
+	metrics.ApplyDirectionalBytes(&event, int64(len(packet)))
 	return event, true
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 
+	"github.com/vmlens/vmlens/agent/internal/metrics"
 	"github.com/vmlens/vmlens/agent/internal/telemetry"
 )
 
@@ -32,20 +33,6 @@ type rawFlowEvent struct {
 	Direction   uint8
 	Packets     uint32
 	ErrorCount  uint32
-}
-
-type legacyRawFlowEvent struct {
-	TimestampNS uint64
-	Bytes       uint64
-	SrcAddr     [16]byte
-	DstAddr     [16]byte
-	Connections uint32
-	SrcPort     uint16
-	DstPort     uint16
-	Family      uint16
-	Protocol    uint8
-	Direction   uint8
-	Packets     uint32
 }
 
 type EBPFOptions struct {
@@ -235,29 +222,11 @@ func (c *EBPFCollector) Run(ctx context.Context) (<-chan telemetry.FlowEvent, <-
 
 func decodeRawFlowEvent(sample []byte) (rawFlowEvent, error) {
 	var raw rawFlowEvent
-	if len(sample) >= binary.Size(raw) {
-		return raw, binary.Read(bytes.NewReader(sample), binary.LittleEndian, &raw)
+	expected := binary.Size(raw)
+	if len(sample) != expected {
+		return rawFlowEvent{}, fmt.Errorf("unexpected eBPF event size %d, want %d", len(sample), expected)
 	}
-	var legacy legacyRawFlowEvent
-	if len(sample) == binary.Size(legacy) {
-		if err := binary.Read(bytes.NewReader(sample), binary.LittleEndian, &legacy); err != nil {
-			return rawFlowEvent{}, err
-		}
-		return rawFlowEvent{
-			TimestampNS: legacy.TimestampNS,
-			Bytes:       legacy.Bytes,
-			SrcAddr:     legacy.SrcAddr,
-			DstAddr:     legacy.DstAddr,
-			Connections: legacy.Connections,
-			SrcPort:     legacy.SrcPort,
-			DstPort:     legacy.DstPort,
-			Family:      legacy.Family,
-			Protocol:    legacy.Protocol,
-			Direction:   legacy.Direction,
-			Packets:     legacy.Packets,
-		}, nil
-	}
-	return rawFlowEvent{}, fmt.Errorf("unexpected eBPF event size %d", len(sample))
+	return raw, binary.Read(bytes.NewReader(sample), binary.LittleEndian, &raw)
 }
 
 func (c *EBPFCollector) convert(raw rawFlowEvent) telemetry.FlowEvent {
@@ -270,26 +239,24 @@ func (c *EBPFCollector) convert(raw rawFlowEvent) telemetry.FlowEvent {
 	protocol := "tcp"
 	switch raw.Protocol {
 	case 1, 58:
-		protocol = "icmp"
+		protocol = metrics.ProtocolICMP
 	case 17:
-		protocol = "udp"
+		protocol = metrics.ProtocolUDP
 	}
-	direction := "egress"
+	direction := metrics.DirectionEgress
 	if raw.Direction == 1 {
-		direction = "ingress"
+		direction = metrics.DirectionIngress
 	}
+	srcPort, dstPort := metrics.NormalizePorts(protocol, int(raw.SrcPort), int(raw.DstPort))
 	now := time.Now().UTC()
 	event := telemetry.FlowEvent{
 		AgentID: c.registration.AgentID, SrcIP: sourceIP, DstIP: destinationIP,
-		SrcPort: int(raw.SrcPort), DstPort: int(raw.DstPort), Protocol: protocol,
-		Direction: direction, ConnectionCount: int64(raw.Connections), RequestCount: requestCount(protocol, direction, raw),
-		ErrorCount: int64(raw.ErrorCount), Packets: int64(raw.Packets), FirstSeen: now, LastSeen: now,
+		SrcPort: srcPort, DstPort: dstPort, Protocol: protocol,
+		Direction: direction, ConnectionCount: int64(raw.Connections),
+		RequestCount: metrics.InferRequestCount(protocol, direction, int64(raw.Bytes), raw.Connections, raw.ErrorCount),
+		ErrorCount:   int64(raw.ErrorCount), Packets: int64(raw.Packets), FirstSeen: now, LastSeen: now,
 	}
-	if direction == "ingress" {
-		event.BytesReceived = int64(raw.Bytes)
-	} else {
-		event.BytesSent = int64(raw.Bytes)
-	}
+	metrics.ApplyDirectionalBytes(&event, int64(raw.Bytes))
 	if c.ifaceName != "" {
 		event.Interface = c.ifaceName
 	} else if len(c.registration.Interfaces) > 0 {
@@ -305,24 +272,6 @@ func (c *EBPFCollector) defaultInterfaceName() string {
 		}
 	}
 	return ""
-}
-
-func requestCount(protocol, direction string, raw rawFlowEvent) int64 {
-	if raw.ErrorCount > 0 {
-		return 0
-	}
-	if raw.Connections > 0 {
-		return int64(raw.Connections)
-	}
-	if protocol != "udp" && protocol != "icmp" || raw.Bytes == 0 {
-		return 0
-	}
-	switch direction {
-	case "egress", "ingress":
-		return 1
-	default:
-		return 0
-	}
 }
 
 func socketIP(value [16]byte, family uint16) string {
