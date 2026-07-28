@@ -1,7 +1,7 @@
-# Orbit critical probing without DeepFlow
+# Orbit critical probing
 
-This document defines the production probing plan when Orbit/VMLens does not use
-DeepFlow. The goal is to keep VM topology useful without creating misleading
+This document defines the production probing plan for Orbit/VMLens with a
+TC/eBPF-first telemetry model. The goal is to keep VM topology useful without creating misleading
 traffic, excessive probe load, or unbounded telemetry storage.
 
 ## Terms
@@ -28,19 +28,41 @@ Visual rule:
 
 ```text
 no reachability        no line
-reachability success   green idle line
-real request success   green animated line
-failed attempt         yellow/red short animation
+reachability success   green idle line when RTT is normal
+slow reachability      yellow idle line when RTT is above threshold
+real request success   animated line using the current edge health color
+failed attempt         red short animation when port/connection is refused
 probe/service failure  degraded state, not counted as user traffic
 ```
 
+Line color rule:
+
+| Color | Meaning | Primary signal | UI behavior | Metric impact |
+| --- | --- | --- | --- | --- |
+| Green | Stable path | latest probe/request succeeds and RTT is below slow threshold | idle green line; animated green line during request | counted only when real traffic exists |
+| Yellow | Slow path | latest successful RTT is above threshold | idle yellow line; animated yellow line during request | not an error by itself |
+| Red | Failed attempt | TCP RST/refused, timeout, or service probe failure | short red animation in the failed direction | increments error metrics, not success request metrics |
+
+Default slow RTT threshold:
+
+| Environment | Threshold | Reason |
+| --- | --- | --- |
+| Same-zone lab/internal VM | `100ms` | anything higher is visibly slow for local OpenStack lab traffic |
+| Cross-zone / private WAN | `250ms` | allows normal inter-zone latency |
+| Internet/external dependency | `500ms` | avoids marking normal public network latency as degraded |
+
+Implementation setting:
+
+| Setting | Default | Used by | Description |
+| --- | --- | --- | --- |
+| `VITE_SLOW_RTT_THRESHOLD_MS` | `100` | frontend topology graph | RTT threshold that changes an idle/request edge from green to yellow |
+
 ## Orbit dashboard data groups
 
-These four views should exist even when DeepFlow is not used. The difference is
-the telemetry source: Orbit uses the VMLens TC/eBPF agent, VM inventory,
-synthetic probes, and optional app/proxy instrumentation.
+These four views should exist from the core telemetry stack. The source is the
+VMLens TC/eBPF agent, VM inventory, synthetic probes, and optional app/proxy instrumentation.
 
-| View | Primary data | Fallback source without DeepFlow | Notes |
+| View | Primary data | Core source | Notes |
 | --- | --- | --- | --- |
 | Request Log | request attempts, service, status/error, latency, endpoint when available | TC/eBPF L4 attempt + TCP RST + optional app/proxy logs | TC/eBPF alone cannot reliably know HTTP path/status without L7 instrumentation |
 | Network Flow | L4 source/destination, ports, protocol, bytes, packets, connections, errors | TC/eBPF on `ens3` | production baseline for topology and traffic accounting |
@@ -53,7 +75,7 @@ synthetic probes, and optional app/proxy instrumentation.
 | --- | --- |
 | ![Request Log Live](screenshot/request-log-live.png) | `docs/screenshot/request-log-live.png` |
 
-| Attribute | Description | Source without DeepFlow | Production note |
+| Attribute | Description | Core source | Production note |
 | --- | --- | --- | --- |
 | `observed_at` | event timestamp | backend ingest time / agent event time | store in UTC |
 | `source_vm_id`, `source_name`, `source_ip` | request source VM | VM inventory + IP mapping | must be tenant/project scoped |
@@ -69,7 +91,7 @@ synthetic probes, and optional app/proxy instrumentation.
 Explanation:
 
 Request Log is the user-facing history of communication attempts. Without
-DeepFlow, Orbit should treat TC/eBPF as the L4 baseline and enrich it with
+external L7 telemetry, Orbit should treat TC/eBPF as the L4 baseline and enrich it with
 service probes or application/proxy logs when available. If only TC/eBPF exists,
 the product can show source, destination, port, protocol, bytes, request attempt,
 and failed attempt, but not reliable HTTP path/status.
@@ -88,7 +110,7 @@ Source priority:
 | --- | --- |
 | ![Network Flow Live](screenshot/network-flow-live.png) | `docs/screenshot/network-flow-live.png` |
 
-| Attribute | Description | Source without DeepFlow | Production note |
+| Attribute | Description | Core source | Production note |
 | --- | --- | --- | --- |
 | `observed_at` | flow observation time | agent batch time | store in UTC |
 | `src_vm_id`, `dst_vm_id` | mapped VM endpoints | VM inventory + IP mapping | nullable when endpoint is external/unmapped |
@@ -107,8 +129,8 @@ Source priority:
 
 Explanation:
 
-Network Flow is the primary fallback when DeepFlow is unavailable. It is
-accurate for L4 topology, bytes, packets, ports, and connection attempts. It
+Network Flow is the primary L4 source. It is accurate for topology, bytes,
+packets, ports, and connection attempts. It
 should drive the graph edges and traffic tables, but it should not pretend to be
 full application tracing.
 
@@ -126,7 +148,7 @@ Source priority:
 | --- | --- |
 | ![Network Cloud Live](screenshot/network-cloud-live.png) | `docs/screenshot/network-cloud-live.png` |
 
-| Attribute | Description | Source without DeepFlow | Production note |
+| Attribute | Description | Core source | Production note |
 | --- | --- | --- | --- |
 | `vm_id`, `vm_name` | cloud host identity | VM inventory | must be ownership scoped |
 | `private_ip`, `public_ip` | VM addresses | agent identity + cloud inventory | public IP may be sensitive |
@@ -164,7 +186,7 @@ Source priority:
 | --- | --- |
 | ![Application Cloud Live](screenshot/application-cloud-live.png) | `docs/screenshot/application-cloud-live.png` |
 
-| Attribute | Description | Source without DeepFlow | Production note |
+| Attribute | Description | Core source | Production note |
 | --- | --- | --- | --- |
 | `vm_id`, `vm_name` | VM running the service | VM inventory | service belongs to tenant/project |
 | `service_name` | application/service label | registered service inventory | avoid guessing from port alone |
@@ -182,8 +204,8 @@ Source priority:
 
 Explanation:
 
-Application Cloud is service health, not network health. Without DeepFlow, Orbit
-needs registered service probes or application/proxy instrumentation to make
+Application Cloud is service health, not network health. Orbit needs registered
+service probes or application/proxy instrumentation to make
 this view accurate. TC/eBPF can provide fallback signals, but it cannot reliably
 identify HTTP routes, status codes, or application errors by itself.
 
@@ -218,28 +240,13 @@ Use this profile as the default for staging/production.
 | Graph query window | `15m` | enough recent context for topology |
 | Internal activity window | `5m` | fast table, low noise |
 
-Large fleet profile:
+### Environment profiles
 
-```text
-heartbeat_interval = 30s
-agent_stale_timeout = 2m
-agent_offline_timeout = 10m
-reachability_probe_interval = 30s
-reachability_fail_threshold = 3
-service_probe_interval = 60s
-max_probe_targets_per_vm = 25
-```
-
-Realtime lab profile:
-
-```text
-heartbeat_interval = 5s
-agent_stale_timeout = 20s
-agent_offline_timeout = 90s
-reachability_probe_interval = 5s
-reachability_fail_threshold = 3
-service_probe_interval = 10s
-```
+| Profile | `heartbeat_interval` | `agent_stale_timeout` | `agent_offline_timeout` | `reachability_probe_interval` | `reachability_fail_threshold` | `service_probe_interval` | `max_probe_targets_per_vm` | Use case |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Production default | `10s` | `45s` | `5m` | `15s` | `3` | `30s` | `50` | normal production/staging |
+| Large fleet | `30s` | `2m` | `10m` | `30s` | `3` | `60s` | `25` | many VMs; lower probe load |
+| Realtime lab | `5s` | `20s` | `90s` | `5s` | `3` | `10s` | `50` | manual test/demo where fast UI feedback matters |
 
 ## Critical probes
 
@@ -247,9 +254,9 @@ service_probe_interval = 10s
 | --- | --- | --- | --- | --- | --- |
 | P0 | Agent health | agent heartbeat to control plane | 10s | stale 45s, offline 5m | VM online/stale/offline |
 | P0 | VM identity | hostname, machine-id, private IP, public IP, NIC list | start + heartbeat refresh | last known until VM deleted | map IP to VM node |
-| P0 | VM reachability | TCP probe to `vmlens-agent:18081` | 15s | fail after 3 misses | green idle connection line |
+| P0 | VM reachability | TCP probe to `vmlens-agent:18081` | 15s | fail after 3 misses | green/yellow idle connection line based on RTT |
 | P0 | L4 traffic | TC/eBPF on main NIC, usually `ens3` | 1s batch | graph window 15m | request animation and traffic metrics |
-| P0 | Failed TCP attempt | TC/eBPF TCP RST detection | 1s batch | visual 4s, store normally | yellow/red failed edge |
+| P0 | Failed TCP attempt | TC/eBPF TCP RST detection | 1s batch | visual 4s, store normally | red failed edge |
 | P0 | Request frequency | TC/eBPF connection/request counter | 1s batch | graph window 15m | request pressure signal |
 | P0 | Bytes/packets | TC/eBPF byte + packet counters | 1s batch | graph window 15m | traffic in/out metrics |
 | P0 | Internal/external scope | VM inventory + CIDR classifier | every ingest | persistent classification | VM-to-VM vs external |
@@ -294,13 +301,17 @@ CONNECTED
   latest reachability probe success is inside connection state timeout
   visual: green idle line
 
+SLOW
+  latest reachability probe succeeds but RTT is above threshold
+  visual: yellow idle line
+
 ACTIVE
   real traffic/request observed inside request visual TTL
-  visual: green animated line on top of connected line
+  visual: animated line using the current edge health color
 
 FAILED_ATTEMPT
   TCP RST, timeout, or service probe failure inside failed visual TTL
-  visual: yellow/red short animation
+  visual: red short animation
 
 DEGRADED
   service probe failed threshold, but VM reachability still works
@@ -329,7 +340,7 @@ SERVICE_DEGRADED -> SERVICE_HEALTHY
 
 ## Data retention TTL
 
-Recommended production retention when DeepFlow is not used:
+Recommended production retention:
 
 | Data | Retention | Notes |
 | --- | --- | --- |
@@ -371,10 +382,6 @@ Exclude control-plane/probe ports from product traffic metrics:
 18080  VMLens backend reverse tunnel
 18081  VMLens connectivity probe listener
 18082  lab relay/backend bridge
-20033  DeepFlow control traffic
-20035  DeepFlow control traffic
-30033  DeepFlow control traffic
-30035  DeepFlow control traffic
 ```
 
 Keep failed attempts separate:
@@ -389,7 +396,8 @@ For UI:
 
 ```text
 request_count drives green request animation
-error_count drives yellow/red failed animation
+slow RTT drives yellow connection/request line
+error_count drives red failed animation
 probe_count drives connected/disconnected state only
 ```
 
@@ -427,143 +435,36 @@ service_probe_interval = 60s
 
 ## Minimal data model
 
-### VM inventory
+Keep the data model compact enough for API contracts and screenshot/table
+documentation. Store details in typed columns; do not keep these as free-form
+logs only.
 
-```text
-vm_id
-tenant_id
-project_id
-region
-zone
-name
-hostname
-machine_id
-private_ip
-public_ip
-interfaces
-default_route
-status
-last_seen
-```
-
-### Agent health
-
-```text
-agent_id
-vm_id
-agent_version
-capture_mode
-capture_interface
-status
-last_heartbeat_at
-last_error
-```
-
-### Reachability probe
-
-```text
-src_vm_id
-dst_vm_id
-src_ip
-dst_ip
-protocol
-dst_port
-success
-rtt_ms
-error_reason
-consecutive_failures
-observed_at
-counted_as_user_traffic=false
-```
-
-### Service probe
-
-```text
-src_vm_id
-dst_vm_id
-service_name
-protocol
-host
-port
-path
-success
-status_code
-latency_ms
-error_reason
-consecutive_failures
-observed_at
-counted_as_user_traffic=false
-```
-
-### L4 flow from TC/eBPF
-
-```text
-src_vm_id
-dst_vm_id
-src_ip
-dst_ip
-src_port
-dst_port
-protocol
-direction
-bytes_sent
-bytes_received
-packets
-connection_count
-request_count
-error_count
-retransmit_count
-first_seen
-last_seen
-observed_at
-```
+| Model | Identity fields | Network/service fields | State/metric fields | Required note |
+| --- | --- | --- | --- | --- |
+| VM inventory | `vm_id`, `tenant_id`, `project_id`, `name`, `hostname`, `machine_id` | `region`, `zone`, `private_ip`, `public_ip`, `interfaces`, `default_route` | `status`, `last_seen` | source of truth for IP-to-VM mapping and ownership filtering |
+| Agent health | `agent_id`, `vm_id`, `agent_version` | `capture_mode`, `capture_interface` | `status`, `last_heartbeat_at`, `last_error` | decides online/stale/offline and whether TC/eBPF data is trustworthy |
+| Reachability probe | `src_vm_id`, `dst_vm_id`, `src_ip`, `dst_ip` | `protocol`, `dst_port` | `success`, `rtt_ms`, `error_reason`, `consecutive_failures`, `observed_at`, `counted_as_user_traffic=false` | drives green/yellow connection state; never counted as user request traffic |
+| Service probe | `src_vm_id`, `dst_vm_id`, `service_name` | `protocol`, `host`, `port`, `path` | `success`, `status_code`, `latency_ms`, `error_reason`, `consecutive_failures`, `observed_at`, `counted_as_user_traffic=false` | tells whether a specific service port is healthy |
+| L4 flow from TC/eBPF | `src_vm_id`, `dst_vm_id`, `src_ip`, `dst_ip` | `src_port`, `dst_port`, `protocol`, `direction` | `bytes_sent`, `bytes_received`, `packets`, `connection_count`, `request_count`, `error_count`, `retransmit_count`, `first_seen`, `last_seen`, `observed_at` | source of actual user traffic and red failed-attempt events |
 
 ## Production enablement plan
 
-Phase 1:
-
-```text
-agent heartbeat
-VM identity inventory
-TC/eBPF L4 capture on ens3
-TCP RST failed-attempt detection
-VMLens reachability probe on 18081
-internal/external classifier
-raw + aggregate retention policy
-```
-
-Phase 2:
-
-```text
-registered service probe
-HTTP/gRPC/Redis/Postgres/etc protocol-specific probe
-service health state
-latency/error aggregates
-```
-
-Phase 3:
-
-```text
-resource pressure correlation
-retransmission/jitter/loss metrics
-SLO dashboards
-tenant-level retention overrides
-```
+| Phase | Scope | Deliverables | UI impact |
+| --- | --- | --- | --- |
+| Phase 1 | production network baseline | agent heartbeat, VM identity inventory, TC/eBPF L4 capture on `ens3`, TCP RST failed-attempt detection, VMLens reachability probe on `18081`, internal/external classifier, raw + aggregate retention policy | VM nodes, green/yellow/red edges, Network Flow, Request Log fallback |
+| Phase 2 | service/application health | registered service probe, HTTP/gRPC/Redis/Postgres/etc protocol-specific probes, service health state, latency/error aggregates | Application Cloud and service-specific Request Log become reliable |
+| Phase 3 | operations maturity | resource pressure correlation, retransmission/jitter/loss metrics, SLO dashboards, tenant-level retention overrides | production dashboards, alerting, tenant policy control |
 
 ## Essentials
 
 Minimum production-critical data:
 
-```text
-VM inventory
-agent heartbeat
-TCP reachability probe
-TC/eBPF bytes/packets/connections
-TCP RST failed attempts
-request_count
-error_count
-internal/external classification
-last_seen timestamps
-retention TTL policy
-tenant/project ownership boundary
-```
+| Category | Required data | Why it is critical |
+| --- | --- | --- |
+| Ownership | VM inventory, tenant/project ownership boundary | prevents cross-tenant data leakage |
+| Agent state | agent heartbeat, last_seen timestamps | determines online/stale/offline |
+| Connectivity | TCP reachability probe, RTT, consecutive failures | drives green/yellow/no-line state |
+| Traffic accounting | TC/eBPF bytes, packets, connections, request_count | shows actual VM traffic from the core tracker |
+| Failure detection | TCP RST failed attempts, error_count | drives red failed-attempt state |
+| Scope classification | internal/external classification | prevents external traffic from being counted as internal VM traffic |
+| Retention | raw and aggregate TTL policy | controls storage cost and production data lifecycle |
