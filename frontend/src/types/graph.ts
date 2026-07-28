@@ -7,6 +7,8 @@ export interface GraphNode {
   type: GraphNodeType
   label: string
   ip?: string
+  private_ip?: string
+  public_ip?: string
   status?: string
   tenant_id?: string
   role?: string
@@ -51,6 +53,42 @@ export interface GraphEdge {
   last_response_code?: number
   agent_ids?: string[]
   observation_points?: string[]
+}
+
+export type ConnectionHealth = 'healthy' | 'degraded' | 'failed' | 'inactive' | 'unknown'
+
+export interface ConnectionSummary {
+  id: string
+  source: string
+  target: string
+  source_label: string
+  target_label: string
+  source_ip?: string
+  target_ip?: string
+  direction: 'one_way' | 'two_way'
+  active_direction: 'source_to_target' | 'target_to_source' | 'bidirectional' | 'none'
+  health: ConnectionHealth
+  scope: string
+  protocols: string[]
+  ports: number[]
+  connected: boolean
+  active: boolean
+  failed: boolean
+  slow: boolean
+  request_count: number
+  error_count: number
+  total_bytes: number
+  packets: number
+  connection_count: number
+  avg_rtt_ms: number
+  p95_rtt_ms: number
+  avg_response_duration_ms: number
+  last_response_code?: number
+  last_seen?: string
+  last_observed_at?: string
+  agent_ids: string[]
+  observation_points: string[]
+  recommendation: string
 }
 
 export interface GraphData {

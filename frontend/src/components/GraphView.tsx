@@ -5,11 +5,12 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-import type { GraphData, GraphEdge, GraphNode } from '../types/graph'
+import type { ConnectionHealth, ConnectionSummary, GraphData, GraphEdge, GraphNode } from '../types/graph'
 
 interface Props {
   graph: GraphData
   onNodeSelect: (node: GraphNode) => void
+  onConnectionSelect: (connection: ConnectionSummary) => void
 }
 
 const statusColors: Record<string, string> = {
@@ -26,6 +27,7 @@ const requestAnimationWindowMs = 4000
 const tcpConnectionWindowMs = 30_000
 const datagramConnectionWindowMs = 15_000
 const edgePulseWindowMs = 900
+const slowRTTThresholdMs = positiveNumberEnv(import.meta.env.VITE_SLOW_RTT_THRESHOLD_MS, 100)
 
 type Point = { x: number; y: number }
 type Viewport = Point & { zoom: number }
@@ -48,14 +50,30 @@ type VisualRelationship = {
   failedReverseUntil: number
   weight: number
   totalBytes: number
+  packets: number
+  connectionCount: number
   requestCount: number
   errorCount: number
   avgRTTMs: number
+  p95RTTMs: number
+  avgResponseDurationMs: number
+  lastResponseCode?: number
+  lastSeen?: string
+  lastObservedAt?: string
+  scopes: Set<string>
   protocols: Set<string>
+  ports: Set<number>
+  agentIDs: Set<string>
+  observationPoints: Set<string>
 }
 
 function clampZoom(zoom: number) {
   return Math.min(maxZoom, Math.max(minZoom, zoom))
+}
+
+function positiveNumberEnv(raw: unknown, fallback: number) {
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
 }
 
 function curvedPath(source: Point, target: Point) {
@@ -197,7 +215,43 @@ function relationshipKey(source: string, target: string) {
   return [source, target].sort().join('<->')
 }
 
-export function GraphView({ graph, onNodeSelect }: Props) {
+function latestTimestamp(current: string | undefined, next: string | undefined) {
+  if (!next) return current
+  if (!current) return next
+  return Date.parse(next) > Date.parse(current) ? next : current
+}
+
+function connectionHealth(connected: boolean, failed: boolean, slow: boolean): ConnectionHealth {
+  if (failed) return 'failed'
+  if (slow) return 'degraded'
+  if (connected) return 'healthy'
+  return 'inactive'
+}
+
+function activeDirection(activeForward: boolean, activeReverse: boolean): ConnectionSummary['active_direction'] {
+  if (activeForward && activeReverse) return 'bidirectional'
+  if (activeForward) return 'source_to_target'
+  if (activeReverse) return 'target_to_source'
+  return 'none'
+}
+
+function connectionRecommendation(connection: Pick<ConnectionSummary, 'health' | 'active' | 'connected' | 'request_count' | 'error_count'>) {
+  if (connection.health === 'failed') {
+    return 'Check destination host health, route, firewall rule, and whether the target service is listening on the observed port. Retest after fixing the failing layer.'
+  }
+  if (connection.health === 'degraded') {
+    return 'Inspect RTT trend, retransmission, packet loss, cross-zone routing, and destination host load. Compare this path with another healthy path.'
+  }
+  if (connection.active) {
+    return 'Request traffic is active. Use Request Flow or L7 Requests to inspect method, path, status code, and app delay.'
+  }
+  if (connection.connected) {
+    return 'Connection is reachable but idle. Keep it as a dependency edge, or run a validation request if this path should carry application traffic.'
+  }
+  return 'No recent observed connectivity. Run a reachability probe or application request before treating this connection as working.'
+}
+
+export function GraphView({ graph, onNodeSelect, onConnectionSelect }: Props) {
   const [clock, setClock] = useState(() => Date.now())
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 })
   const [panning, setPanning] = useState(false)
@@ -325,15 +379,23 @@ export function GraphView({ graph, onNodeSelect }: Props) {
         failedReverseUntil: 0,
         weight: 1,
         totalBytes: 0,
+        packets: 0,
+        connectionCount: 0,
         requestCount: 0,
         errorCount: 0,
         avgRTTMs: 0,
+        p95RTTMs: 0,
+        avgResponseDurationMs: 0,
+        scopes: new Set<string>(),
         protocols: new Set<string>(),
+        ports: new Set<number>(),
+        agentIDs: new Set<string>(),
+        observationPoints: new Set<string>(),
       }
       const isReachability = edge.kind === 'reachability' || edge.reachable === true || edge.protocol === 'icmp'
       const animates = isRequestEdge(edge)
       const until = isReachability || !animates ? 0 : activeUntil(edge)
-      const failedUntilValue = isReachability || (edge.error_count ?? 0) <= 0 ? 0 : failedUntil(edge)
+      const failedUntilValue = edge.failed || (!isReachability && (edge.error_count ?? 0) > 0) ? failedUntil(edge) : 0
       const connectedUntil = Math.max(connectionUntil(edge), until)
       const freshUntil = pulseUntil(edge)
       current.hasTraffic = current.hasTraffic || !isReachability
@@ -341,6 +403,17 @@ export function GraphView({ graph, onNodeSelect }: Props) {
       if (edge.protocol) {
         current.protocols.add(edge.protocol)
       }
+      if (edge.scope) {
+        current.scopes.add(edge.scope)
+      }
+      const servicePort = edge.server_port || edge.dst_port
+      if (servicePort > 0) {
+        current.ports.add(servicePort)
+      }
+      edge.agent_ids?.forEach((agentID) => current.agentIDs.add(agentID))
+      edge.observation_points?.forEach((point) => current.observationPoints.add(point))
+      current.lastSeen = latestTimestamp(current.lastSeen, edge.last_seen)
+      current.lastObservedAt = latestTimestamp(current.lastObservedAt, edge.last_observed_at)
       if (directionKey === forwardKey) {
         current.hasForward = true
         current.connectionForwardUntil = Math.max(current.connectionForwardUntil, connectedUntil)
@@ -357,10 +430,17 @@ export function GraphView({ graph, onNodeSelect }: Props) {
       if (!isReachability) {
         current.weight = Math.max(current.weight, edge.weight)
         current.totalBytes += edge.total_bytes ?? edge.bytes_sent + edge.bytes_received
+        current.packets += edge.packets ?? 0
+        current.connectionCount += edge.connection_count ?? 0
         current.requestCount += edge.request_count ?? 0
         current.errorCount += edge.error_count ?? 0
       }
       current.avgRTTMs = Math.max(current.avgRTTMs, edge.avg_rtt_ms ?? 0)
+      current.p95RTTMs = Math.max(current.p95RTTMs, edge.p95_rtt_ms ?? 0)
+      current.avgResponseDurationMs = Math.max(current.avgResponseDurationMs, edge.avg_response_duration_ms ?? 0)
+      if (edge.last_response_code !== undefined) {
+        current.lastResponseCode = edge.last_response_code
+      }
       relationships.set(key, current)
     })
 
@@ -378,13 +458,16 @@ export function GraphView({ graph, onNodeSelect }: Props) {
       const connectionReverse = relationship.connectionReverseUntil > clock
       const connected = connectionForward || connectionReverse || active || failed
       const fresh = relationship.pulseForwardUntil > clock || relationship.pulseReverseUntil > clock || failed
+      const slow = connected && !failed && relationship.avgRTTMs >= slowRTTThresholdMs
       const reachabilityOnly = relationship.hasReachability && !relationship.hasTraffic
       const start = edgePoint(source.center, target.center)
       const end = edgePoint(target.center, source.center)
       const protocolLabel = Array.from(relationship.protocols).filter(Boolean).sort().join('/')
+      const healthLabel = failed ? 'failed' : slow ? 'slow RTT' : connected ? 'stable' : ''
       const label = reachabilityOnly
-        ? ['connected', protocolLabel, relationship.hasForward && relationship.hasReverse ? '2-way' : '', relationship.avgRTTMs ? `${relationship.avgRTTMs.toFixed(1)}ms` : ''].filter(Boolean).join(' · ')
+        ? [healthLabel, protocolLabel, relationship.hasForward && relationship.hasReverse ? '2-way' : '', relationship.avgRTTMs ? `${relationship.avgRTTMs.toFixed(1)}ms` : ''].filter(Boolean).join(' · ')
         : [
+          healthLabel,
           formatCompactBytes(relationship.totalBytes),
           relationship.requestCount ? `${relationship.requestCount} req` : '',
           protocolLabel,
@@ -392,11 +475,54 @@ export function GraphView({ graph, onNodeSelect }: Props) {
           relationship.avgRTTMs ? `${relationship.avgRTTMs.toFixed(1)}ms` : '',
           relationship.errorCount ? `${relationship.errorCount} err` : '',
         ].filter(Boolean).join(' · ')
+      const health = connectionHealth(connected, failed, slow)
+      const summaryBase = {
+        health,
+        active,
+        connected,
+        request_count: relationship.requestCount,
+        error_count: relationship.errorCount,
+      }
+      const connection: ConnectionSummary = {
+        id,
+        source: relationship.source,
+        target: relationship.target,
+        source_label: source.node.label,
+        target_label: target.node.label,
+        source_ip: source.node.ip,
+        target_ip: target.node.ip,
+        direction: relationship.hasForward && relationship.hasReverse ? 'two_way' : 'one_way',
+        active_direction: activeDirection(activeForward, activeReverse),
+        health,
+        scope: Array.from(relationship.scopes).sort()[0] || (reachabilityOnly ? 'reachability' : 'unknown'),
+        protocols: Array.from(relationship.protocols).filter(Boolean).sort(),
+        ports: Array.from(relationship.ports).filter((port) => port > 0).sort((a, b) => a - b),
+        connected,
+        active,
+        failed,
+        slow,
+        request_count: relationship.requestCount,
+        error_count: relationship.errorCount,
+        total_bytes: relationship.totalBytes,
+        packets: relationship.packets,
+        connection_count: relationship.connectionCount,
+        avg_rtt_ms: relationship.avgRTTMs,
+        p95_rtt_ms: relationship.p95RTTMs,
+        avg_response_duration_ms: relationship.avgResponseDurationMs,
+        last_response_code: relationship.lastResponseCode,
+        last_seen: relationship.lastSeen,
+        last_observed_at: relationship.lastObservedAt,
+        agent_ids: Array.from(relationship.agentIDs).sort(),
+        observation_points: Array.from(relationship.observationPoints).sort(),
+        recommendation: connectionRecommendation(summaryBase),
+      }
       return {
         id,
         active,
+        failed,
         connected,
         fresh,
+        slow,
         hasTraffic: relationship.hasTraffic,
         reachabilityOnly,
         activeForward,
@@ -412,6 +538,7 @@ export function GraphView({ graph, onNodeSelect }: Props) {
         label,
         labelX: (start.x + end.x) / 2,
         labelY: (start.y + end.y) / 2 - 10,
+        connection,
       }
     })
   }, [clock, graph.edges, nodeByID, nodeIDs])
@@ -448,49 +575,64 @@ export function GraphView({ graph, onNodeSelect }: Props) {
           <marker id="edge-arrow-idle" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
             <path d="M 1 1 L 9 5 L 1 9 z" fill="#5fae7e" />
           </marker>
+          <marker id="edge-arrow-slow" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
+            <path d="M 1 1 L 9 5 L 1 9 z" fill="#d9ad55" />
+          </marker>
           <marker id="edge-arrow-reachability" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
             <path d="M 1 1 L 9 5 L 1 9 z" fill="#79add1" />
           </marker>
           <marker id="edge-arrow-failed" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
-            <path d="M 1 1 L 9 5 L 1 9 z" fill="#d89b45" />
+            <path d="M 1 1 L 9 5 L 1 9 z" fill="#e15757" />
           </marker>
         </defs>
-        {edges.map((edge) => edge.connected ? <path
-          key={edge.id}
-          className={`graph-edge graph-edge-connection graph-edge-idle${edge.fresh ? ' graph-edge-pulse' : ''}`}
-          d={edge.path}
-          markerStart={edge.connectionReverse ? 'url(#edge-arrow-idle)' : undefined}
-          markerEnd={edge.connectionForward ? 'url(#edge-arrow-idle)' : undefined}
-          style={{ strokeWidth: edge.active ? Math.max(1.25, edge.width * 0.75) : 1.35, opacity: edge.active ? 0.58 : 0.72 }}
-        /> : null)}
-        {edges.map((edge) => edge.activeForward ? <path
-          key={`${edge.id}-forward-active`}
-          className="graph-edge graph-edge-active graph-edge-forward"
-          d={edge.path}
-          markerEnd="url(#edge-arrow-active)"
-          style={{ strokeWidth: edge.width }}
-        /> : null)}
-        {edges.map((edge) => edge.activeReverse ? <path
-          key={`${edge.id}-reverse-active`}
-          className="graph-edge graph-edge-active graph-edge-reverse"
-          d={edge.path}
-          markerStart="url(#edge-arrow-active)"
-          style={{ strokeWidth: edge.width }}
-        /> : null)}
-        {edges.map((edge) => edge.failedForward ? <path
-          key={`${edge.id}-forward-failed`}
-          className="graph-edge graph-edge-failed graph-edge-forward"
-          d={edge.path}
-          markerEnd="url(#edge-arrow-failed)"
-          style={{ strokeWidth: Math.max(edge.width, 2.2) }}
-        /> : null)}
-        {edges.map((edge) => edge.failedReverse ? <path
-          key={`${edge.id}-reverse-failed`}
-          className="graph-edge graph-edge-failed graph-edge-reverse"
-          d={edge.path}
-          markerStart="url(#edge-arrow-failed)"
-          style={{ strokeWidth: Math.max(edge.width, 2.2) }}
-        /> : null)}
+        {edges.map((edge) => {
+          if (!edge.connected) return null
+          const markerID = edge.failed
+            ? 'edge-arrow-failed'
+            : edge.active
+              ? edge.slow ? 'edge-arrow-slow' : 'edge-arrow-active'
+              : edge.slow ? 'edge-arrow-slow' : 'edge-arrow-idle'
+          const showStartMarker = edge.failed
+            ? edge.failedReverse
+            : edge.active
+              ? edge.activeReverse
+              : edge.connectionReverse
+          const showEndMarker = edge.failed
+            ? edge.failedForward
+            : edge.active
+              ? edge.activeForward
+              : edge.connectionForward
+          const classNames = ['graph-edge', 'graph-edge-single']
+          if (edge.failed) {
+            classNames.push('graph-edge-failed')
+            if (edge.failedReverse && !edge.failedForward) classNames.push('graph-edge-reverse')
+            if (edge.failedForward && edge.failedReverse) classNames.push('graph-edge-bidirectional')
+          } else if (edge.active) {
+            classNames.push('graph-edge-active')
+            if (edge.slow) classNames.push('graph-edge-active-slow')
+            if (edge.activeReverse && !edge.activeForward) classNames.push('graph-edge-reverse')
+            if (edge.activeForward && edge.activeReverse) classNames.push('graph-edge-bidirectional')
+          } else {
+            classNames.push('graph-edge-connection', edge.slow ? 'graph-edge-slow' : 'graph-edge-idle')
+            if (edge.fresh) classNames.push('graph-edge-pulse')
+          }
+          return <path
+            key={edge.id}
+            className={classNames.join(' ')}
+            d={edge.path}
+            onClick={(event) => {
+              event.stopPropagation()
+              onConnectionSelect(edge.connection)
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+            markerStart={showStartMarker ? `url(#${markerID})` : undefined}
+            markerEnd={showEndMarker ? `url(#${markerID})` : undefined}
+            style={{
+              strokeWidth: edge.failed ? Math.max(edge.width, 2.2) : edge.active ? edge.width : 1.45,
+              opacity: edge.failed ? 0.98 : edge.active ? 0.95 : 0.74,
+            }}
+          />
+        })}
         {edges.map((edge) => edge.connected && edge.label ? <text
           key={`${edge.id}-label`}
           className="graph-edge-label"
@@ -513,6 +655,7 @@ export function GraphView({ graph, onNodeSelect }: Props) {
           <span className="vm-node-text">
             <strong>{node.label}</strong>
             <small>{node.ip || 'no IP'} · {status}</small>
+            <em>{node.role || node.type || 'host'}</em>
           </span>
           <NodeStatusIcon status={status} />
         </div>

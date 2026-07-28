@@ -23,6 +23,13 @@ function rowKey(item: InternalActivity) {
   return `${item.id}:${item.direction}:${item.observed_at}`
 }
 
+function rowClassName(item: InternalActivity, fresh: boolean) {
+  const classes: string[] = []
+  if (fresh) classes.push('log-row-fresh')
+  if (item.error_count > 0) classes.push('log-row-error')
+  return classes.length ? classes.join(' ') : undefined
+}
+
 export function InternalActivityTable({
   activity,
   windowLabel,
@@ -61,13 +68,27 @@ export function InternalActivityTable({
       <div><small>INTERNAL ACTIVITY</small><span>Latest registered VM-to-VM traffic from the VMLens agent</span></div>
       <span>{activity.length}/{limit} latest · {windowLabel}</span>
     </div>
+    <div className="table-guide" aria-label="Internal activity guide">
+      <span>
+        <strong>Purpose</strong>
+        <small>Fast local signal from VMLens agent for VM-to-VM activity.</small>
+      </span>
+      <span>
+        <strong>Map behavior</strong>
+        <small>Used to refresh topology from direct TC/eBPF agent telemetry.</small>
+      </span>
+      <span>
+        <strong>Debug signal</strong>
+        <small>Errors turn rows red; request/rate counters show current pressure.</small>
+      </span>
+    </div>
     <div className="activity-table-wrap">
       <table className="activity-table">
         <thead><tr><th>Observed UTC</th><th>Client → Server</th><th>Service</th><th>Observer side</th><th>Bytes</th><th>Frequency</th><th>Captured by</th></tr></thead>
         <tbody>
           {activity.map((item) => {
             const key = rowKey(item)
-            return <tr key={`${item.id}-${item.direction}`} className={freshRows.has(key) ? 'log-row-fresh' : undefined}>
+            return <tr key={`${item.id}-${item.direction}`} className={rowClassName(item, freshRows.has(key))}>
             <td className="activity-time">{activityTime(item.observed_at)}</td>
             <td><div className="activity-route">
               {endpoint('client', item.source_name, item.source_ip)}

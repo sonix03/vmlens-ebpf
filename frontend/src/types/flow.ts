@@ -18,6 +18,8 @@ export interface Flow {
   protocol: 'tcp' | 'udp' | 'icmp'
   direction: 'ingress' | 'egress'
   scope: FlowScope
+  service?: string
+  service_port?: number
   bytes_sent: number
   bytes_received: number
   packets: number
@@ -30,4 +32,5 @@ export interface Flow {
   last_seen: string
   observed_at?: string
   last_error_at?: string
+  interface_name?: string
 }

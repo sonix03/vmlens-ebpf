@@ -4,7 +4,9 @@ COPY package.json package-lock.json* ./
 RUN npm install
 COPY . .
 ARG VITE_API_URL=
+ARG VITE_SLOW_RTT_THRESHOLD_MS=100
 ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_SLOW_RTT_THRESHOLD_MS=$VITE_SLOW_RTT_THRESHOLD_MS
 RUN npm run build
 
 FROM nginx:1.27-alpine

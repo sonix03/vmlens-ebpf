@@ -1,40 +1,34 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, GRAFANA_APPLICATION_HOST_URL, GRAFANA_L4_URL, GRAFANA_L7_URL, GRAFANA_NETWORK_HOST_URL } from './api/client'
 import { connectRealtime } from './api/realtime'
-import { DeepFlowFlowTable, type DeepFlowTableMode } from './components/DeepFlowFlowTable'
+import { EdgeDetailsPanel } from './components/EdgeDetailsPanel'
+import { FlowTelemetryTable, type FlowTableMode } from './components/FlowTelemetryTable'
 import { GraphView } from './components/GraphView'
 import { InternalActivityTable } from './components/InternalActivityTable'
 import { NodeDetailsPanel } from './components/NodeDetailsPanel'
 import { StatCards } from './components/StatCards'
 import type { Flow } from './types/flow'
-import type { DeepFlowHealth, DeepFlowRawLogs } from './types/deepflow'
-import type { GraphData, GraphEdge, GraphFilters, GraphNode } from './types/graph'
+import type { ConnectionSummary, GraphData, GraphEdge, GraphFilters, GraphNode } from './types/graph'
 import type { InternalActivity } from './types/internalActivity'
 import type { Summary } from './types/stats'
 import type { VM } from './types/vm'
-import { isDeepFlowConnectionFlow, isDeepFlowRequestFlow } from './utils/flowFilters'
+import { isConnectionFlow, isRequestFlow } from './utils/flowFilters'
 
 const graphWindow: GraphFilters = {
   vm_id: '', scope: '', protocol: '', port: '', time_range: '15m', min_bytes: '', status: '',
 }
 
-const deepFlowLogWindow: GraphFilters = {
-  vm_id: '', scope: '', protocol: '', port: '', time_range: '1h', min_bytes: '', status: '',
-}
-
 const internalActivityWindow = '5m'
 const internalActivityLimit = 200
-const deepFlowLogLimit = 500
 
 const graphWindowLabel = graphWindow.time_range
-const deepFlowWindowLabel = deepFlowLogWindow.time_range
 
 const activeWindowMs = 4000
 const canonicalRefreshDelayMs = 1000
 const tablePulseMs = 900
-type ActivityView = 'internal' | DeepFlowTableMode
+type ActivityView = 'internal' | FlowTableMode
 const graphExcludedPorts = new Set(
-  ((import.meta.env.VITE_GRAPH_EXCLUDED_PORTS as string | undefined) ?? '22,53,123,8080,18080,18081,18082,20033,20035,30033,30035')
+  ((import.meta.env.VITE_GRAPH_EXCLUDED_PORTS as string | undefined) ?? '22,53,123,8080,18080,18081,18082')
     .split(',')
     .map((item) => Number(item.trim()))
     .filter((item) => Number.isFinite(item)),
@@ -108,6 +102,8 @@ function vmToGraphNode(vm: VM): GraphNode {
     type: 'vm',
     label: vm.name,
     ip: vm.private_ip || vm.public_ip || vm.interfaces?.find((item) => item.ip_address)?.ip_address,
+    private_ip: vm.private_ip,
+    public_ip: vm.public_ip,
     status: vm.status,
     tenant_id: vm.tenant_id,
     role: vm.role,
@@ -157,6 +153,8 @@ function mergeVMInventory(graph: GraphData, inventory: GraphNode[]): GraphData {
         status: existing.status || vmNode.status,
         tenant_id: existing.tenant_id || vmNode.tenant_id,
         role: existing.role || vmNode.role,
+        private_ip: existing.private_ip || vmNode.private_ip,
+        public_ip: existing.public_ip || vmNode.public_ip,
       })
       return
     }
@@ -262,10 +260,10 @@ export function App() {
   const [graph, setGraph] = useState<GraphData>({ nodes: [], edges: [] })
   const [summary, setSummary] = useState<Summary>()
   const [internalActivity, setInternalActivity] = useState<InternalActivity[]>([])
-  const [deepFlowRaw, setDeepFlowRaw] = useState<DeepFlowRawLogs>()
-  const [deepFlowHealth, setDeepFlowHealth] = useState<DeepFlowHealth>()
+  const [flowLog, setFlowLog] = useState<Flow[]>([])
   const [activityView, setActivityView] = useState<ActivityView>('internal')
   const [selectedNode, setSelectedNode] = useState<GraphNode>()
+  const [selectedConnection, setSelectedConnection] = useState<ConnectionSummary>()
   const [connected, setConnected] = useState(false)
   const [error, setError] = useState('')
   const [freshTabs, setFreshTabs] = useState<Partial<Record<ActivityView, boolean>>>({})
@@ -289,22 +287,9 @@ export function App() {
     }
   }, [])
 
-  const loadDeepFlow = useCallback(async () => {
-    const [nextDeepFlowRaw, nextDeepFlowHealth] = await Promise.allSettled([
-      api.deepFlowRaw(deepFlowLogWindow, deepFlowLogLimit), api.deepFlowHealth(),
-    ])
-
-    if (nextDeepFlowRaw.status === 'fulfilled') {
-      setDeepFlowRaw(nextDeepFlowRaw.value)
-    }
-    if (nextDeepFlowHealth.status === 'fulfilled') {
-      setDeepFlowHealth(nextDeepFlowHealth.value)
-    }
-  }, [])
-
   const load = useCallback(async () => {
-    const [nextGraph, nextSummary, nextActivity, nextVMs] = await Promise.allSettled([
-      api.graph(graphWindow), api.summary(), api.internalActivity(internalActivityLimit, internalActivityWindow), api.vms(),
+    const [nextGraph, nextSummary, nextActivity, nextFlows, nextVMs] = await Promise.allSettled([
+      api.graph(graphWindow), api.summary(), api.internalActivity(internalActivityLimit, internalActivityWindow), api.flows(), api.vms(),
     ])
     if (nextVMs.status === 'fulfilled') {
       vmInventory.current = nextVMs.value.map(vmToGraphNode)
@@ -324,8 +309,10 @@ export function App() {
     if (nextActivity.status === 'fulfilled') {
       setInternalActivity(nextActivity.value)
     }
-    void loadDeepFlow()
-  }, [loadDeepFlow])
+    if (nextFlows.status === 'fulfilled') {
+      setFlowLog(nextFlows.value)
+    }
+  }, [])
 
   useEffect(() => {
     void load()
@@ -340,6 +327,7 @@ export function App() {
         const flow = event.data
         setGraph((current) => applyLiveFlow(current, flow, event.timestamp))
         setSummary((current) => applyLiveSummary(current, flow, event.timestamp))
+        setFlowLog((current) => [flow, ...current.filter((item) => item.id !== flow.id)].slice(0, 500))
       }
       // Direct SSE mutation paints the active line immediately. A throttled
       // canonical refresh reconciles aggregate counters, nodes and metrics.
@@ -363,6 +351,23 @@ export function App() {
     else if (currentNode !== selectedNode) setSelectedNode(currentNode)
   }, [graph.nodes, selectedNode])
 
+  useEffect(() => {
+    if (!selectedConnection) return
+    const sourceExists = graph.nodes.some((node) => node.id === selectedConnection.source)
+    const targetExists = graph.nodes.some((node) => node.id === selectedConnection.target)
+    if (!sourceExists || !targetExists) setSelectedConnection(undefined)
+  }, [graph.nodes, selectedConnection])
+
+  const handleNodeSelect = useCallback((node: GraphNode) => {
+    setSelectedConnection(undefined)
+    setSelectedNode(node)
+  }, [])
+
+  const handleConnectionSelect = useCallback((connection: ConnectionSummary) => {
+    setSelectedNode(undefined)
+    setSelectedConnection(connection)
+  }, [])
+
   const displayGraph = useMemo(() => vmTopologyOnly(graph), [graph])
   const vmCount = displayGraph.nodes.filter((node) => node.type === 'vm').length
   const vmIDs = new Set(displayGraph.nodes.filter((node) => node.type === 'vm').map((node) => node.id))
@@ -371,19 +376,14 @@ export function App() {
       .filter((edge) => vmIDs.has(edge.source) && vmIDs.has(edge.target) && edge.source !== edge.target)
       .map((edge) => [edge.source, edge.target].sort().join('<->')),
   ).size
-  const deepFlowConnectionCount = Array.isArray(deepFlowRaw?.l4) ? deepFlowRaw.l4.filter(isDeepFlowConnectionFlow).length : 0
-  const deepFlowRequestCount = Array.isArray(deepFlowRaw?.l7) ? deepFlowRaw.l7.filter(isDeepFlowRequestFlow).length : 0
   const tableSignatures = useMemo<Record<ActivityView, string>>(() => {
-    const l4Rows = Array.isArray(deepFlowRaw?.l4) ? deepFlowRaw.l4 : []
-    const l7Rows = Array.isArray(deepFlowRaw?.l7) ? deepFlowRaw.l7 : []
     return {
       internal: internalActivity.slice(0, 5).map((item) => `${item.id}:${item.observed_at}`).join('|'),
-      connection: l4Rows.filter(isDeepFlowConnectionFlow).slice(0, 5).map((item) => `${item.time}:${item.source_ip}:${item.dest_ip}:${item.server_port}`).join('|'),
-      request: l7Rows.filter(isDeepFlowRequestFlow).slice(0, 5).map((item) => `${item.time}:${item.source_ip}:${item.dest_ip}:${item.request_resource}:${item.response_code}`).join('|'),
-      l4: l4Rows.slice(0, 5).map((item) => `${item.time}:${item.source_ip}:${item.dest_ip}:${item.server_port}`).join('|'),
-      l7: l7Rows.slice(0, 5).map((item) => `${item.time}:${item.source_ip}:${item.dest_ip}:${item.request_resource}:${item.response_code}`).join('|'),
+      connection: flowLog.filter(isConnectionFlow).slice(0, 5).map((item) => `${item.id}:${item.observed_at}:${item.src_ip}:${item.dst_ip}:${item.dst_port}`).join('|'),
+      request: flowLog.filter(isRequestFlow).slice(0, 5).map((item) => `${item.id}:${item.observed_at}:${item.src_ip}:${item.dst_ip}:${item.request_count}:${item.error_count}`).join('|'),
+      l4: flowLog.slice(0, 5).map((item) => `${item.id}:${item.observed_at}:${item.src_ip}:${item.dst_ip}:${item.dst_port}`).join('|'),
     }
-  }, [deepFlowRaw, internalActivity])
+  }, [flowLog, internalActivity])
   const previousTableSignatures = useRef(tableSignatures)
   useEffect(() => {
     const changedTabs = (Object.keys(tableSignatures) as ActivityView[])
@@ -406,10 +406,9 @@ export function App() {
   }, [tableSignatures])
   const tableTabs: Array<{ id: ActivityView; label: string; count: number }> = [
     { id: 'internal', label: 'Internal Activity', count: internalActivity.length },
-    { id: 'connection', label: 'Connection Flow', count: deepFlowConnectionCount },
-    { id: 'request', label: 'Request Flow', count: deepFlowRequestCount },
-    { id: 'l4', label: 'L4 Flows', count: Array.isArray(deepFlowRaw?.l4) ? deepFlowRaw.l4.length : 0 },
-    { id: 'l7', label: 'L7 Requests', count: Array.isArray(deepFlowRaw?.l7) ? deepFlowRaw.l7.length : 0 },
+    { id: 'connection', label: 'Connection Flow', count: flowLog.filter(isConnectionFlow).length },
+    { id: 'request', label: 'Request Flow', count: flowLog.filter(isRequestFlow).length },
+    { id: 'l4', label: 'L4 Flows', count: flowLog.length },
   ]
 
   return <main className="app-shell">
@@ -427,12 +426,13 @@ export function App() {
     <section className="workspace simple">
       <div className="graph-card">
         <div className="graph-heading">
-          <div><small>VM TOPOLOGY</small></div>
-          <div className="legend"><span className="vm-dot">Virtual machine</span><span className="edge-line idle-line">Connection</span><span className="edge-line active-line">Request traffic</span><span className="edge-line failed-line">Failed attempt</span></div>
+          <div><small>VM TOPOLOGY</small><h2>One edge: idle connection, moving request</h2></div>
+          <div className="legend"><span className="vm-dot">Virtual machine</span><span className="edge-line idle-line">Stable RTT</span><span className="edge-line slow-line">Slow RTT</span><span className="edge-line active-line">Request traffic</span><span className="edge-line failed-line">Port refused</span></div>
         </div>
-        <GraphView graph={displayGraph} onNodeSelect={setSelectedNode} />
+        <GraphView graph={displayGraph} onNodeSelect={handleNodeSelect} onConnectionSelect={handleConnectionSelect} />
       </div>
-      {selectedNode && <NodeDetailsPanel node={selectedNode} onClose={() => setSelectedNode(undefined)} />}
+      {selectedNode && <NodeDetailsPanel node={selectedNode} graph={graph} onClose={() => setSelectedNode(undefined)} />}
+      {selectedConnection && <EdgeDetailsPanel connection={selectedConnection} onClose={() => setSelectedConnection(undefined)} />}
     </section>
     <section className="activity-switcher">
       <div className="activity-tabs" role="tablist" aria-label="Telemetry tables">
@@ -450,8 +450,8 @@ export function App() {
       </div>
       {activityView === 'internal'
         ? <InternalActivityTable activity={internalActivity} windowLabel={internalActivityWindow} limit={internalActivityLimit} />
-        : <DeepFlowFlowTable raw={deepFlowRaw} health={deepFlowHealth} mode={activityView} />}
+        : <FlowTelemetryTable flows={flowLog} graph={graph} mode={activityView} />}
     </section>
-    <footer><span>Topology window {graphWindowLabel} · DeepFlow log window {deepFlowWindowLabel}</span><span>{vmCount} VMs · {relationshipCount} relationships</span></footer>
+    <footer><span>Topology window {graphWindowLabel} · TC/eBPF flow log</span><span>{vmCount} VMs · {relationshipCount} relationships</span></footer>
   </main>
 }
