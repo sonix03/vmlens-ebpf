@@ -37,6 +37,14 @@ func classifyService(protocol, direction string, srcPort, dstPort int) (string, 
 	if protocol == "tcp" && dstPort >= 30000 && dstPort <= 32767 {
 		return "kubernetes-nodeport", dstPort
 	}
+	if srcPort > 0 && dstPort > 0 {
+		if !isEphemeralPort(srcPort) && isEphemeralPort(dstPort) {
+			return fmt.Sprintf("%s/%d", protocol, srcPort), srcPort
+		}
+		if isEphemeralPort(srcPort) && !isEphemeralPort(dstPort) {
+			return fmt.Sprintf("%s/%d", protocol, dstPort), dstPort
+		}
+	}
 	if direction == "ingress" {
 		return fmt.Sprintf("%s/%d", protocol, srcPort), srcPort
 	}

@@ -33,3 +33,21 @@ func TestClassifyUnknownServiceKeepsObservedPort(t *testing.T) {
 		t.Fatalf("unexpected custom service %s/%d", name, port)
 	}
 }
+
+func TestClassifyUnknownServicePrefersNonEphemeralPort(t *testing.T) {
+	tests := []struct {
+		name      string
+		direction string
+		srcPort   int
+		dstPort   int
+	}{
+		{name: "client-to-server", direction: "ingress", srcPort: 57750, dstPort: 8099},
+		{name: "server-rst-to-client", direction: "egress", srcPort: 8099, dstPort: 57750},
+	}
+	for _, test := range tests {
+		name, port := classifyService("tcp", test.direction, test.srcPort, test.dstPort)
+		if name != "tcp/8099" || port != 8099 {
+			t.Fatalf("%s classified as %s/%d, want tcp/8099", test.name, name, port)
+		}
+	}
+}
