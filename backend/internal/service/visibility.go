@@ -1,5 +1,10 @@
 package service
 
+import (
+	"net/netip"
+	"strings"
+)
+
 func hiddenByGraphVisibility(visibility GraphVisibility, srcPort, dstPort int, srcIP, dstIP string) bool {
 	if len(visibility.AllowedPorts) > 0 && !portMatchesAny(visibility.AllowedPorts, srcPort, dstPort) {
 		return true
@@ -11,6 +16,9 @@ func hiddenByGraphVisibility(visibility GraphVisibility, srcPort, dstPort int, s
 }
 
 func hiddenByGraphIPs(visibility GraphVisibility, srcIP, dstIP string) bool {
+	if isGraphNoiseIP(srcIP) || isGraphNoiseIP(dstIP) {
+		return true
+	}
 	for _, ip := range visibility.ExcludedIPs {
 		if ip == "" {
 			continue
@@ -20,6 +28,14 @@ func hiddenByGraphIPs(visibility GraphVisibility, srcIP, dstIP string) bool {
 		}
 	}
 	return false
+}
+
+func isGraphNoiseIP(ip string) bool {
+	addr, err := netip.ParseAddr(strings.TrimSpace(ip))
+	if err != nil {
+		return false
+	}
+	return addr.IsLoopback() || addr.IsMulticast() || addr.IsLinkLocalUnicast() || addr.IsUnspecified()
 }
 
 func hiddenByServicePort(visibility GraphVisibility, servicePort int) bool {
