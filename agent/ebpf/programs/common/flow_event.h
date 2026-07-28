@@ -1,5 +1,5 @@
-#ifndef VMLENS_FLOW_EVENT_H
-#define VMLENS_FLOW_EVENT_H
+#ifndef FLOW_EVENT_H
+#define FLOW_EVENT_H
 
 struct flow_event {
     __u64 timestamp_ns;
@@ -28,4 +28,4 @@ struct {
     __type(value, struct flow_event);
 } pending_io SEC(".maps");
 
-#endif // VMLENS_FLOW_EVENT_H
+#endif // FLOW_EVENT_H

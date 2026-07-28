@@ -1,8 +1,11 @@
-#ifndef VMLENS_SOCKET_CAPTURE_H
-#define VMLENS_SOCKET_CAPTURE_H
+#ifndef SOCKET_CAPTURE_H
+#define SOCKET_CAPTURE_H
 
 #include "../common/flow_defs.h"
 #include "../common/flow_event.h"
+#include "../metrics/bytes.h"
+#include "../metrics/ports.h"
+#include "../metrics/request_response.h"
 
 static __always_inline void socket_metadata(struct flow_event *event, struct sock *sk,
                                              __u8 protocol, __u8 direction)
@@ -20,8 +23,9 @@ static __always_inline void socket_metadata(struct flow_event *event, struct soc
         __builtin_memcpy(event->dst_addr, &dst_addr, sizeof(dst_addr));
         event->family = AF_INET_VALUE;
     }
-    event->src_port = BPF_CORE_READ(sk, __sk_common.skc_num);
-    event->dst_port = __builtin_bswap16(BPF_CORE_READ(sk, __sk_common.skc_dport));
+    set_ports(event,
+              BPF_CORE_READ(sk, __sk_common.skc_num),
+              __builtin_bswap16(BPF_CORE_READ(sk, __sk_common.skc_dport)));
     event->protocol = protocol;
     event->direction = direction;
     event->timestamp_ns = bpf_ktime_get_ns();
@@ -33,7 +37,7 @@ static __always_inline int emit_connection(struct sock *sk, __u8 protocol, __u8 
     if (!event) return 0;
     __builtin_memset(event, 0, sizeof(*event));
     socket_metadata(event, sk, protocol, direction);
-    event->connections = 1;
+    mark_connection(event);
     bpf_ringbuf_submit(event, 0);
     return 0;
 }
@@ -57,7 +61,7 @@ static __always_inline int finish_io(struct pt_regs *ctx)
         struct flow_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
         if (event) {
             __builtin_memcpy(event, saved, sizeof(*event));
-            event->bytes = (__u64)result;
+            set_bytes(event, (__u64)result);
             bpf_ringbuf_submit(event, 0);
         }
     }
@@ -65,4 +69,4 @@ static __always_inline int finish_io(struct pt_regs *ctx)
     return 0;
 }
 
-#endif // VMLENS_SOCKET_CAPTURE_H
+#endif // SOCKET_CAPTURE_H

@@ -1,5 +1,5 @@
-#ifndef VMLENS_FLOW_DEFS_H
-#define VMLENS_FLOW_DEFS_H
+#ifndef FLOW_DEFS_H
+#define FLOW_DEFS_H
 
 #define DIR_INGRESS 1
 #define DIR_EGRESS 2
@@ -35,4 +35,4 @@
 
 #define TC_ACT_OK 0
 
-#endif // VMLENS_FLOW_DEFS_H
+#endif // FLOW_DEFS_H
