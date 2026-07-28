@@ -79,7 +79,7 @@ func TestGraphDefaultsShowIdleConnectionsAndHideTelemetryNoise(t *testing.T) {
 	if !cfg.Graph.IncludeIdle {
 		t.Fatal("default graph should keep idle connection lines visible")
 	}
-	wantPorts := map[int]bool{22: true, 53: true, 123: true, 8080: true, 18080: true, 30033: true, 30035: true}
+	wantPorts := map[int]bool{22: true, 53: true, 123: true, 30033: true, 30035: true, 8080: true, 18080: true, 18081: true, 18082: true}
 	for _, port := range cfg.Graph.ExcludedPorts {
 		delete(wantPorts, port)
 	}
