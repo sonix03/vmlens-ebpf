@@ -4,9 +4,10 @@ Use this folder for product docs, setup guides and repeatable operations notes.
 
 ```text
 architecture.md              system architecture
-deepflow-integration.md      DeepFlow L4/L7 integration notes
 external-multizone-tracking.md
-orbit-critical-probing.md    critical fallback probes without DeepFlow
+host-connection-journeys.md  product journeys for host connectivity
+metrics-model.md             TC/eBPF metric model
+orbit-critical-probing.md    production probing and retention model
 prebuilt-agent.md            release artifact and VM install flow
 privacy.md                   privacy and data boundary
 project-structure.md         repository layout

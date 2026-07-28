@@ -106,20 +106,19 @@ Expected:
 - `external_flows` and `external_bytes` increase;
 - `internal_flows` does not increase for the external target.
 
-## DeepFlow coexistence check
+## TC/eBPF attachment check
 
-Run on the VM where DeepFlow is installed:
+Run on the VM:
 
 ```bash
-systemctl status deepflow-agent --no-pager
-sudo bpftool prog show | grep -Ei 'deepflow|vmlens|tc|trace' || true
-sudo bpftool link show | grep -Ei 'deepflow|vmlens|tcx|tc' || true
+sudo bpftool prog show | grep -Ei 'vmlens|tc|trace' || true
+sudo bpftool link show | grep -Ei 'vmlens|tcx|tc' || true
 sudo tc filter show dev ens3 ingress || true
 sudo tc filter show dev ens3 egress || true
 ```
 
-If DeepFlow already owns an incompatible TC hook on the same interface, run
-VMLens in fallback socket mode:
+If TC attach is not available on the VM image, run VMLens in fallback socket
+mode:
 
 ```bash
 sudo sed -i 's/^CAPTURE_MODE=.*/CAPTURE_MODE=kprobe/' /etc/vmlens/agent.env

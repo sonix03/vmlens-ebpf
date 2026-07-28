@@ -16,14 +16,12 @@ scripts/        active operator scripts for tunnels, agent install, release, tes
 configs/        local operator config examples
 deploy/         runtime/deployment assets
 docs/           architecture, setup guides and operations notes
-legacy/         old v1 prototype stack, kept for reference
 ```
 
 ## Deploy layout
 
 ```text
 deploy/
-  deepflow/      local DeepFlow service config used by docker-compose.deepflow.yml
   openstack/     OpenStack cloud-init / Customization Script files
 ```
 
@@ -109,19 +107,5 @@ frontend/
   src/types/              TypeScript DTOs
 ```
 
-## Legacy layout
-
-```text
-legacy/v1-stack/
-  bpf/       old CO-RE programs
-  cmd/       old CLI entrypoints
-  config/    old YAML config
-  deploy/    old monitoring/deployment files
-  examples/  old traffic/resource demos
-  internal/  old private Go packages
-  pkg/       old public-ish Go packages
-  scripts/   old install/run helpers
-```
-
-Use `legacy/v1-stack/` only for reference or migration work. New work should go
+Legacy prototype code has been removed from the active tree. New work should go
 into the active root folders above.

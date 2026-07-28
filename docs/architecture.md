@@ -14,8 +14,7 @@ socket metadata ──────> network collector ─────┤
 ```
 
 The active VM-side eBPF program lives under `agent/ebpf/programs/`, with
-fallback headers under `agent/ebpf/include/`. Older prototype CO-RE programs
-were moved to `legacy/v1-stack/bpf/` for reference.
+fallback headers under `agent/ebpf/include/`.
 
 CPU is computed from deltas in process scheduler ticks. RSS comes from `/proc/<pid>/stat`; cumulative storage bytes come from `/proc/<pid>/io`. TCP sockets are joined to process file descriptors by inode. This gives correct ownership metadata but no byte-accurate network accounting; RX/TX remain zero in fallback mode.
 

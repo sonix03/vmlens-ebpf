@@ -1,8 +1,6 @@
 # VMLens eBPF
 
-<p align="center">
-  <strong>Real-time VM network relationship tracking with eBPF</strong>
-</p>
+Real-time VM network relationship tracking with a TC/eBPF agent.
 
 <p align="center">
   <a href="https://github.com/sonix03/vmlens-ebpf/releases/latest">
@@ -10,174 +8,57 @@
   </a>
   <img alt="Go" src="https://img.shields.io/badge/Go-1.22-00ADD8?style=for-the-badge&logo=go&logoColor=white">
   <img alt="React" src="https://img.shields.io/badge/React-TypeScript-61DAFB?style=for-the-badge&logo=react&logoColor=111">
-  <img alt="eBPF" src="https://img.shields.io/badge/eBPF-network%20telemetry-purple?style=for-the-badge">
+  <img alt="eBPF" src="https://img.shields.io/badge/TC%2FeBPF-network%20tracker-purple?style=for-the-badge">
 </p>
 
-VMLens observes VM-to-VM and VM-to-external network relationships, then shows
-them as live topology lines in a local dashboard.
-
-DeepFlow is packaged as an optional local compose overlay for L4/L7 telemetry.
-In that mode, VMLens reads DeepFlow raw rows, filters them by VM inventory,
-deduplicates tap side duplicates, and renders VM-centric topology edges. See
-[docs/deepflow-integration.md](./docs/deepflow-integration.md).
-
-It is designed for development and lab environments where the dashboard runs on
-your laptop, while lightweight agents run inside cloud VMs.
+VMLens observes VM-to-VM and VM-to-external network relationships, then renders
+them as topology edges in a local dashboard. The telemetry source is the
+project's own VM agent, which attaches TC/eBPF programs to the VM network
+interface, usually `ens3`.
 
 ```text
 Cloud VM A ─┐
-            │  eBPF metadata
-Cloud VM B ─┼── vmlens-agent ── reverse SSH tunnel ── local control-plane ── dashboard
+            │  TC/eBPF flow metadata
+Cloud VM B ─┼── vmlens-agent ── reverse SSH tunnel ── control-plane ── dashboard
             │
 External IP ┘
 ```
 
-## What it tracks
+## What VMLens tracks
 
-VMLens tracks relationship metadata only:
-
-- VM identity, hostname, OS, kernel, interfaces, IPs and MAC addresses;
-- TCP/UDP source and destination IP/port;
-- sent and received bytes;
-- connection/request frequency approximation;
-- internal vs external traffic;
-- online, stale and offline VM state;
-- live active communication lines in the UI.
+- VM identity, hostname, interfaces, private/public IPs and agent status.
+- TCP/UDP/ICMP source and destination IP/port.
+- Sent bytes, received bytes and packet count.
+- Connection/request attempt counters.
+- Error counters for failed attempts such as refused TCP connections.
+- Internal vs external traffic based on registered VM inventory.
+- Connectivity probe RTT for idle connection state.
+- Live topology state: green idle connection, yellow slow RTT, red failed path,
+  moving line for active request traffic.
 
 VMLens does not capture packet payloads, HTTP bodies, TLS plaintext, SSH
 content, database queries, files, command lines, or request/response bodies.
 
-## Traffic classification
-
-VMLens classifies a flow as internal only when the destination IP belongs to a
-registered VM in the VMLens inventory. This avoids counting an untracked private
-cloud VM as internal just because it uses a `10.x`, `172.16.x` or `192.168.x`
-address.
-
-Default scopes:
-
-- `internal_same_tenant`: source and destination are registered VMs in the same tenant;
-- `internal_cross_tenant`: source and destination are registered VMs in different tenants;
-- `external_private`: destination is a private IP but not a registered VM;
-- `external_public`: destination is a public IP;
-- `unknown_internal`: optional discovery mode for unregistered private IPs.
-
-To enable the older discovery behavior:
-
-```bash
-UNREGISTERED_INTERNAL_SCOPE=unknown_internal docker compose up -d --build
-```
-
-## Current tested flow
-
-The latest tested end-to-end flow uses prebuilt release assets:
-
-```text
-vmlens-agent-linux-amd64
-flow_tracker-linux-amd64.bpf.o
-install-agent.sh
-SHA256SUMS
-```
-
-That means a VM can install the agent without:
-
-```text
-git clone
-go build
-clang build
-bpftool build step
-```
-
-Tested with:
-
-```text
-local dashboard: Docker Compose
-VM 10.20.20.130: Ubuntu, agent active
-VM 10.20.20.199: Ubuntu, agent active
-traffic: 10.20.20.130 -> 10.20.20.199:8081
-result: 20/20 HTTP 200, internal flows and request counters increased
-```
-
-Full copy-paste E2E notes are in
-[docs/runbooks/e2e-setup.md](./docs/runbooks/e2e-setup.md).
-
-For external private service VMs across zones, use the dedicated flow in
-[docs/external-multizone-tracking.md](./docs/external-multizone-tracking.md).
-That setup captures tracked internal VMs through Traffic Control on `ens3` while
-keeping unregistered private service VMs counted as `external_private`.
-
-## Architecture
-
-```text
-┌──────────────────────────┐
-│ Cloud VM                 │
-│                          │
-│  vmlens-agent            │
-│  ├─ register VM          │
-│  ├─ heartbeat            │
-│  └─ send flow metadata   │
-└────────────┬─────────────┘
-             │
-             │ reverse SSH tunnel
-             ▼
-┌──────────────────────────┐
-│ Local control-plane      │
-│ Go API :8080             │
-│ PostgreSQL               │
-│ SSE realtime events      │
-└────────────┬─────────────┘
-             │
-             ▼
-┌──────────────────────────┐
-│ Dashboard :3000          │
-│ VM graph                 │
-│ live relationship lines  │
-│ traffic/request metrics  │
-└──────────────────────────┘
-```
-
 ## Quick start
 
-### 1. Start local dashboard
-
-Recommended full local stack with DeepFlow:
+### 1. Start local stack
 
 ```bash
 bash scripts/vmlens-stack.sh start
 ```
 
-This starts:
-
-```text
-VMLens dashboard     http://localhost:3000
-VMLens API           http://localhost:8080
-DeepFlow Grafana     http://localhost:3001
-DeepFlow ClickHouse  http://localhost:8123
-```
-
-The packaged DeepFlow stack starts the central DeepFlow services. DeepFlow VM
-agents still need to be installed on the VMs you want DeepFlow to observe. The
-VMLens agent remains the realtime source for live topology lines.
-
-On start, VMLens also creates or updates these Grafana dashboards:
-
-```text
-VMLens Live - Network Flow Log
-VMLens Live - Request Log
-VMLens Live - Network Cloud Host
-VMLens Live - Application Cloud Host
-```
-
-Core VMLens only, without DeepFlow:
+Equivalent raw compose command:
 
 ```bash
-bash scripts/vmlens-stack.sh start --core
+docker compose up -d --build
 ```
 
-Raw Docker Compose equivalent for the full stack:
+Services:
 
-```bash
-docker compose -f docker-compose.yml -f docker-compose.deepflow.yml up -d --build
+```text
+Dashboard  http://localhost:3000
+API        http://localhost:8080
+Postgres   localhost:5432
 ```
 
 Check:
@@ -186,64 +67,38 @@ Check:
 curl http://127.0.0.1:8080/health
 curl http://127.0.0.1:8080/api/agents
 curl http://127.0.0.1:8080/api/vms
-curl http://127.0.0.1:8080/api/stats/summary
 ```
 
-Open:
+### 2. Start reverse tunnel to each VM
 
-```text
-http://localhost:3000
-```
-
-On a clean database, agents and VMs should be empty:
-
-```text
-[]
-[]
-```
-
-### 2. Start one tunnel per VM
-
-Run on local:
+Run on local machine:
 
 ```bash
-bash scripts/vmlens-tunnel.sh start <VM_IP> ~/.vmlens/keys/id_ed25519_vmlens
+bash scripts/vmlens-tunnel.sh start <VM_IP> ~/.ssh/id_ed25519_vmlens
 ```
 
 Example:
 
 ```bash
-bash scripts/vmlens-tunnel.sh start 10.20.20.130 ~/.vmlens/keys/id_ed25519_vmlens
-bash scripts/vmlens-tunnel.sh start 10.20.20.199 ~/.vmlens/keys/id_ed25519_vmlens
+bash scripts/vmlens-tunnel.sh start 10.20.20.130 ~/.ssh/id_ed25519_vmlens
+bash scripts/vmlens-tunnel.sh start 10.20.20.199 ~/.ssh/id_ed25519_vmlens
 ```
 
-Check:
+The tunnel exposes the local API inside the VM:
+
+```text
+VM http://127.0.0.1:18080 -> local http://127.0.0.1:8080
+```
+
+Status:
 
 ```bash
-bash scripts/vmlens-tunnel.sh status <VM_IP> ~/.vmlens/keys/id_ed25519_vmlens
+bash scripts/vmlens-tunnel.sh status <VM_IP> ~/.ssh/id_ed25519_vmlens
 ```
 
-Expected:
+### 3. Install the TC/eBPF agent on each VM
 
-```text
-running
-```
-
-The VM agent will use this backend URL:
-
-```text
-http://127.0.0.1:18080
-```
-
-That port exists inside the VM because the local machine created a reverse SSH
-tunnel.
-
-The tunnel is only for agent telemetry. VM network traffic is captured from the
-VM interface, normally `ens3`, through Traffic Control.
-
-### 3. Install the VM agent from release
-
-Run on each cloud VM:
+Using release artifacts:
 
 ```bash
 curl -fsSL -o /tmp/vmlens-install-agent.sh \
@@ -261,54 +116,27 @@ sudo env \
   CONNECTIVITY_PROBE_ENABLED=true \
   CONNECTIVITY_PROBE_INTERVAL=5s \
   CONNECTIVITY_PROBE_LISTEN_ADDR=0.0.0.0:18081 \
-  IGNORE_PORTS=18080,18081,18082,30033,30035 \
+  IGNORE_PORTS=18080,18081,18082 \
   AGENT_BINARY_URL=https://github.com/sonix03/vmlens-ebpf/releases/latest/download/vmlens-agent-linux-amd64 \
   BPF_OBJECT_URL=https://github.com/sonix03/vmlens-ebpf/releases/latest/download/flow_tracker-linux-amd64.bpf.o \
-  INSTALL_DEEPFLOW_AGENT=true \
-  INSTALL_DEEPFLOW_RELAY=true \
-  DEEPFLOW_AGENT_VERSION=v6.6.1 \
   bash /tmp/vmlens-install-agent.sh
 ```
 
-Check:
+Check on the VM:
 
 ```bash
 systemctl is-active vmlens-agent
-systemctl is-active deepflow-agent
 sudo systemctl status vmlens-agent --no-pager
-sudo systemctl status deepflow-agent --no-pager
-sudo journalctl -u vmlens-agent -n 50 --no-pager
-sudo journalctl -u deepflow-agent -n 50 --no-pager
+sudo journalctl -u vmlens-agent -n 80 --no-pager
+sudo tc filter show dev ens3 ingress
+sudo tc filter show dev ens3 egress
 ```
 
-Expected:
+Expected log signal:
 
 ```text
-active
-registered agent=...
 eBPF collector loaded object=/usr/lib/vmlens/flow_tracker.bpf.o mode=tc interface=ens3
 TRACER_RUNNING
-```
-
-When the install command is run over SSH, the installer automatically adds the
-SSH tunnel peer IP to the deny filter so backend tunnel traffic is not counted
-as external VM traffic.
-
-### 4. Verify local dashboard sees the VMs
-
-Run on local:
-
-```bash
-curl http://127.0.0.1:8080/api/agents
-curl http://127.0.0.1:8080/api/vms
-curl http://127.0.0.1:8080/api/stats/summary
-```
-
-Expected:
-
-```text
-agents: online
-VMs: online
 ```
 
 ## Test VM-to-VM traffic
@@ -322,13 +150,11 @@ python3 -m http.server 8081 --bind 0.0.0.0
 Client VM:
 
 ```bash
-python3 -c "import time, urllib.request
-for i in range(1, 21):
-    r = urllib.request.urlopen('http://10.20.20.199:8081/', timeout=5)
-    print(f'request={i:02d} status={r.status}')
-    r.read(128)
-    time.sleep(0.2)
-"
+for i in $(seq 1 20); do
+  code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 http://<SERVER_VM_IP>:8081/ || true)
+  echo "request=$i status=$code"
+  sleep 0.2
+done
 ```
 
 Local verification:
@@ -336,130 +162,75 @@ Local verification:
 ```bash
 curl http://127.0.0.1:8080/api/stats/summary
 curl 'http://127.0.0.1:8080/api/internal/activity?limit=10'
+curl 'http://127.0.0.1:8080/api/flows?limit=20'
 curl http://127.0.0.1:8080/api/graph
-curl 'http://127.0.0.1:8080/api/deepflow/raw/flows?time_range=30m&limit=10'
-curl http://127.0.0.1:8080/api/deepflow/health
 ```
 
-Expected activity:
+UI behavior:
 
 ```text
-testing-a-2 (10.20.20.130) -> testing-a-1 (10.20.20.199):8081 tcp
-DeepFlow L4: tcp 10.20.20.130 -> 10.20.20.199:8081
-DeepFlow L7: HTTP GET / response_code=200
+green idle line   = VM reachability/connectivity is healthy
+yellow idle line  = RTT is slow
+red line/row      = failed attempt, usually refused port or timeout
+moving line       = active request/traffic on the same edge
 ```
-
-DeepFlow raw logs and Cloud Host metrics normally appear after a short ingest
-delay. For lab testing, wait 8-15 seconds after sending traffic before checking
-Grafana or ClickHouse.
-
-VMLens filters known telemetry/control traffic by default:
-
-```text
-Agent IGNORE_PORTS=18080,18081,18082,30033,30035
-DEEPFLOW_EXCLUDED_PORTS=22,53,123,8080,18080,18081,18082,20033,20035,30033,30035
-DEEPFLOW_EXCLUDED_IPS=10.20.20.125,127.0.0.1,127.0.0.53
-DEEPFLOW_EXCLUDED_L7_RESOURCE_PREFIXES=/trident.,trident.,/api/agents/,/api/flows/ingest,/health
-```
-
-This keeps VMLens request tables focused on application/testing traffic instead
-of VMLens tunnel or DeepFlow agent-to-server traffic.
-
-Connectivity lines use a separate VMLens probe:
-
-```text
-source=vmlens_probe
-type=connectivity_check
-counted_as_request=false
-counted_as_user_traffic=false
-```
-
-The probe keeps an existing VM-to-VM edge visible as an idle green line after
-real traffic has already created that relationship. Real request traffic uses
-the same line and adds directional animation for a short activity window.
 
 ## Common operations
 
-### Stop local dashboard
-
 ```bash
-docker compose down
-```
-
-Stop and delete local database:
-
-```bash
+bash scripts/vmlens-stack.sh status
+bash scripts/vmlens-stack.sh logs
+bash scripts/vmlens-stack.sh restart
+bash scripts/vmlens-stack.sh stop
 docker compose down -v
 ```
 
-### Stop VM agent
-
-Run on the VM:
+Tunnel:
 
 ```bash
-sudo systemctl stop vmlens-agent
-```
-
-### Stop tunnel
-
-Run on local:
-
-```bash
-bash scripts/vmlens-tunnel.sh stop <VM_IP> ~/.vmlens/keys/id_ed25519_vmlens
-```
-
-### Reset SSH known host
-
-Use this when OpenStack reuses an IP and SSH says the host key changed:
-
-```bash
+bash scripts/vmlens-tunnel.sh list
+bash scripts/vmlens-tunnel.sh start <VM_IP> ~/.ssh/id_ed25519_vmlens
+bash scripts/vmlens-tunnel.sh stop <VM_IP> ~/.ssh/id_ed25519_vmlens
 bash scripts/vmlens-tunnel.sh forget-host <VM_IP>
 ```
 
-## Supported communication tests
+Agent:
 
-VMLens observes TCP/UDP transport metadata, so it can show relationships for
-many development-style communications:
-
-| Communication | Example |
-| --- | --- |
-| HTTP service | `curl`, Python `http.server`, frontend/backend traffic |
-| TCP service | `nc`, Redis, PostgreSQL, RabbitMQ, app-to-app calls |
-| UDP service | DNS, UDP test traffic |
-| SSH/SCP | admin or file transfer sessions |
-| External traffic | package download, git clone, API calls |
-| Kubernetes to service VM | pod/node traffic to Redis/Postgres/RabbitMQ VM |
-
-For exact application-level request latency, status code, path, tenant, and
-trace context, combine this with application logs, OpenTelemetry, Prometheus or
-a proxy.
-
-## Status model
-
-```text
-online  = recent register/heartbeat/activity
-stale   = no recent heartbeat/activity for a short period
-offline = no heartbeat/activity past the offline threshold
+```bash
+sudo systemctl restart vmlens-agent
+sudo systemctl stop vmlens-agent
+sudo journalctl -u vmlens-agent -f
 ```
 
-Offline nodes are retained as inventory/history instead of being removed
-immediately.
+## Traffic classification
+
+VMLens treats a flow as internal only when the destination IP belongs to a
+registered VM in the inventory.
+
+```text
+internal_same_tenant   registered source VM -> registered destination VM, same tenant
+internal_cross_tenant  registered source VM -> registered destination VM, different tenant
+external_private       private destination IP not registered as a VM
+external_public        public destination IP
+unknown_internal       optional discovery mode for unregistered private IPs
+```
+
+Enable discovery mode:
+
+```bash
+UNREGISTERED_INTERNAL_SCOPE=unknown_internal docker compose up -d --build
+```
 
 ## Repository layout
 
 ```text
-agent/        VM agent source and eBPF collector
-  ebpf/       eBPF programs and fallback headers
-  internal/   capture, identity, telemetry, transport and lifecycle packages
-backend/      Go control-plane API and migrations
+agent/        VM agent and TC/eBPF programs
+backend/      Go control-plane API, graph, stats and database migrations
 frontend/     React dashboard
-scripts/      tunnel, install, release and agent helpers
+scripts/      stack, tunnel, install, release and test helpers
 configs/      local tunnel/VM profile examples
-deploy/       Docker Compose overlays, DeepFlow config and OpenStack cloud-init
+deploy/       deployment assets, currently OpenStack cloud-init
 docs/         setup guides, runbooks, architecture and privacy notes
-  setup/      local/cloud setup and OpenStack customization docs
-  runbooks/   E2E command flows and communication test recipes
-legacy/       older v1 prototype stack kept for reference
 ```
 
 ## API quick reference
@@ -469,27 +240,29 @@ GET  /health
 GET  /api/agents
 GET  /api/vms
 GET  /api/graph
+GET  /api/flows
 GET  /api/stats/summary
 GET  /api/internal/activity
 GET  /api/realtime
 POST /api/agents/register
 POST /api/agents/heartbeat
 POST /api/flows/ingest
+POST /api/connections/probe
 ```
 
 ## Requirements
 
 Local:
 
-- Docker Desktop or Docker Engine with Compose;
-- ports `3000`, `5432`, and `8080` available;
+- Docker Desktop or Docker Engine with Compose.
+- Ports `3000`, `5432`, and `8080` available.
 - SSH access to the VMs.
 
 VM:
 
-- Linux amd64;
-- root/sudo access for systemd service and eBPF load;
-- kernel BTF available:
+- Linux amd64.
+- Root/sudo access for systemd service and eBPF load.
+- Kernel BTF:
 
 ```bash
 test -r /sys/kernel/btf/vmlinux
@@ -497,18 +270,6 @@ test -r /sys/kernel/btf/vmlinux
 
 ## Security note
 
-This project currently targets development and controlled lab usage.
-
-Do not expose the local backend publicly without adding TLS, authentication and
-ingest authorization.
-
-## More docs
-
-- [docs/setup/local-cloud.md](./docs/setup/local-cloud.md) — local dashboard and cloud VM setup.
-- [docs/setup/openstack-customization.md](./docs/setup/openstack-customization.md) — OpenStack/user-data configuration.
-- [docs/runbooks/e2e-setup.md](./docs/runbooks/e2e-setup.md) — tested E2E flow from zero.
-- [docs/runbooks/communication-catalog.md](./docs/runbooks/communication-catalog.md) — communication test catalog.
-- [docs/runbooks/communications](./docs/runbooks/communications) — copy-paste traffic test commands.
-- [deploy/openstack](./deploy/openstack) — cloud-init files for OpenStack.
-- [docs/prebuilt-agent.md](./docs/prebuilt-agent.md) — release artifact flow.
-- [docs/privacy.md](./docs/privacy.md) — privacy boundary.
+This project currently targets development and controlled lab usage. Do not
+expose the local backend publicly without TLS, authentication and ingest
+authorization.
