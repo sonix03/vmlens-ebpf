@@ -51,11 +51,11 @@ func (s *ConnectionService) Targets(ctx context.Context, agentID string) ([]mode
 					WHEN f.dst_vm_id = self.vm_id THEN f.src_vm_id
 					ELSE NULL
 				END AS dest_vm_id,
-				MAX(f.last_seen) AS last_seen
+				MAX(f.observed_at) AS last_seen
 			FROM self
 			JOIN network_flows f ON f.scope IN ('internal_same_tenant', 'internal_cross_tenant')
 				AND (f.src_vm_id = self.vm_id OR f.dst_vm_id = self.vm_id)
-				AND f.last_seen >= NOW() - $2::interval
+				AND f.observed_at >= NOW() - $2::interval
 			GROUP BY self.vm_id, self.source_ip, dest_vm_id
 		)
 		SELECT pf.source_vm_id, pf.source_ip, peer.id, peer.name, COALESCE(host(peer.private_ip), ''),
