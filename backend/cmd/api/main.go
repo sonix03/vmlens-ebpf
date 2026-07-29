@@ -11,6 +11,7 @@ import (
 	"time"
 
 	apihttp "github.com/vmlens/vmlens/backend/internal/api"
+	"github.com/vmlens/vmlens/backend/internal/cloud"
 	"github.com/vmlens/vmlens/backend/internal/config"
 	"github.com/vmlens/vmlens/backend/internal/db"
 	"github.com/vmlens/vmlens/backend/internal/realtime"
@@ -51,9 +52,14 @@ func run() error {
 	}
 	flows := service.NewFlowService(pool, classifier, hub, graphVisibility)
 	connections := service.NewConnectionService(pool, hub)
+	connectionStates := service.NewConnectionStateService(pool, cfg.FlowActiveWindow)
+	cloudContext := service.NewCloudContextService(pool, cloud.NewNoopProvider())
 	graph := service.NewGraphService(pool, vms, cfg.FlowActiveWindow, graphVisibility)
 	stats := service.NewStatsService(pool)
-	handlers := &apihttp.Handlers{Pool: pool, Agents: agents, VMs: vms, Flows: flows, Connections: connections, Graph: graph, Stats: stats}
+	handlers := &apihttp.Handlers{
+		Pool: pool, Agents: agents, VMs: vms, Flows: flows, Connections: connections,
+		ConnectionStates: connectionStates, Cloud: cloudContext, Graph: graph, Stats: stats,
+	}
 
 	server := &http.Server{Addr: cfg.ListenAddr, Handler: apihttp.Routes(handlers, hub, cfg.AllowedOrigins), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 	serverErrors := make(chan error, 1)

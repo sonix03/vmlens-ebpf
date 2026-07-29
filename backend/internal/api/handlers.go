@@ -16,13 +16,15 @@ import (
 )
 
 type Handlers struct {
-	Pool        *pgxpool.Pool
-	Agents      *service.AgentService
-	VMs         *service.VMService
-	Flows       *service.FlowService
-	Connections *service.ConnectionService
-	Graph       *service.GraphService
-	Stats       *service.StatsService
+	Pool             *pgxpool.Pool
+	Agents           *service.AgentService
+	VMs              *service.VMService
+	Flows            *service.FlowService
+	Connections      *service.ConnectionService
+	ConnectionStates *service.ConnectionStateService
+	Cloud            *service.CloudContextService
+	Graph            *service.GraphService
+	Stats            *service.StatsService
 }
 
 func (h *Handlers) Root(w http.ResponseWriter, r *http.Request) {
@@ -34,6 +36,8 @@ func (h *Handlers) Root(w http.ResponseWriter, r *http.Request) {
 		"api": []string{
 			"/api/agents",
 			"/api/vms",
+			"/api/connections",
+			"/api/cloud/context",
 			"/api/graph",
 			"/api/internal/activity",
 		},
@@ -118,6 +122,41 @@ func (h *Handlers) ListConnectionTargets(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (h *Handlers) ListConnections(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	filter, err := connectionViewFilter(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	result, err := h.ConnectionStates.List(r.Context(), filter)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handlers) CloudStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	result, err := h.Cloud.Status(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handlers) CloudContext(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	result, err := h.Cloud.Context(r.Context(), cloudContextFilter(r))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (h *Handlers) RecordConnectionProbe(w http.ResponseWriter, r *http.Request) {
 	var request model.ConnectionProbeEvent
 	if err := decodeJSON(r, &request); err != nil {
@@ -198,7 +237,7 @@ func (h *Handlers) TopTalkers(w http.ResponseWriter, r *http.Request) {
 func graphFilter(r *http.Request) (model.GraphFilter, error) {
 	query := r.URL.Query()
 	filter := model.GraphFilter{
-		AgentID: query.Get("agent_id"), TenantID: query.Get("tenant_id"), VMID: query.Get("vm_id"),
+		AgentID: query.Get("agent_id"), TenantID: query.Get("tenant_id"), ProjectID: query.Get("project_id"), VMID: query.Get("vm_id"),
 		Scope: query.Get("scope"), Protocol: strings.ToLower(query.Get("protocol")), Status: query.Get("status"),
 	}
 	if raw := query.Get("port"); raw != "" {
@@ -223,6 +262,28 @@ func graphFilter(r *http.Request) (model.GraphFilter, error) {
 		filter.TimeRange = duration
 	}
 	return filter, nil
+}
+
+func connectionViewFilter(r *http.Request) (model.ConnectionViewFilter, error) {
+	query := r.URL.Query()
+	filter := model.ConnectionViewFilter{
+		TenantID: query.Get("tenant_id"), ProjectID: query.Get("project_id"), VMID: query.Get("vm_id"),
+	}
+	if raw := query.Get("time_range"); raw != "" {
+		duration, err := parseDuration(raw)
+		if err != nil {
+			return filter, fmt.Errorf("invalid time_range: %w", err)
+		}
+		filter.TimeRange = duration
+	}
+	return filter, nil
+}
+
+func cloudContextFilter(r *http.Request) model.CloudContextFilter {
+	query := r.URL.Query()
+	return model.CloudContextFilter{
+		TenantID: query.Get("tenant_id"), ProjectID: query.Get("project_id"), VMID: query.Get("vm_id"),
+	}
 }
 
 func parseDuration(raw string) (time.Duration, error) {
