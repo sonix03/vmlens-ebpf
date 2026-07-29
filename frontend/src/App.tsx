@@ -23,6 +23,7 @@ const internalActivityLimit = 200
 
 const graphWindowLabel = graphWindow.time_range
 
+const categoryTabs = ['Orbit View', 'Compute', 'Network', 'Application', 'Diagnostics'] as const
 const activeWindowMs = 4000
 const canonicalRefreshDelayMs = 1000
 const tablePulseMs = 900
@@ -413,6 +414,13 @@ export function App() {
 
   return <main className="app-shell">
     <header className="app-header">
+      <div className="brand-lockup" aria-label="VMLens Orbit">
+        <span className="brand-mark">VL</span>
+        <span className="brand-copy">
+          <strong>VMLens</strong>
+          <small>Orbit View Cloud</small>
+        </span>
+      </div>
       <div className="header-actions">
         <a className="grafana-link" href={GRAFANA_L4_URL} target="_blank" rel="noreferrer">Grafana L4</a>
         <a className="grafana-link" href={GRAFANA_L7_URL} target="_blank" rel="noreferrer">Grafana L7</a>
@@ -421,12 +429,20 @@ export function App() {
         <div className="live-state"><i className={connected ? 'connected' : ''} /><span>{connected ? 'Realtime connected' : 'Realtime reconnecting'}</span></div>
       </div>
     </header>
+    <nav className="category-tabs" aria-label="Cloud product sections">
+      {categoryTabs.map((tab) => <button
+        key={tab}
+        type="button"
+        className={`category-tab${tab === 'Orbit View' ? ' active' : ''}`}
+      >
+        {tab}
+      </button>)}
+    </nav>
     {error && <div className="error-banner"><strong>Backend unavailable</strong><span>{error}</span></div>}
     <StatCards summary={summary} />
     <section className="workspace simple">
       <div className="graph-card">
-        <div className="graph-heading">
-          <div><small>VM TOPOLOGY</small><h2>One edge: idle connection, moving request</h2></div>
+        <div className="graph-heading graph-heading-compact">
           <div className="legend"><span className="vm-dot">Virtual machine</span><span className="edge-line idle-line">Stable RTT</span><span className="edge-line slow-line">Slow RTT</span><span className="edge-line active-line">Request traffic</span><span className="edge-line failed-line">Port refused</span></div>
         </div>
         <GraphView graph={displayGraph} onNodeSelect={handleNodeSelect} onConnectionSelect={handleConnectionSelect} />
@@ -449,7 +465,7 @@ export function App() {
         </button>)}
       </div>
       {activityView === 'internal'
-        ? <InternalActivityTable activity={internalActivity} windowLabel={internalActivityWindow} limit={internalActivityLimit} />
+        ? <InternalActivityTable activity={internalActivity} graph={graph} windowLabel={internalActivityWindow} limit={internalActivityLimit} />
         : <FlowTelemetryTable flows={flowLog} graph={graph} mode={activityView} />}
     </section>
     <footer><span>Topology window {graphWindowLabel} · TC/eBPF flow log</span><span>{vmCount} VMs · {relationshipCount} relationships</span></footer>
