@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { GraphData } from '../types/graph'
 import type { InternalActivity } from '../types/internalActivity'
 import { formatUTCClock } from '../utils/time'
 import { formatBytes } from './StatCards'
+
+const slowRTTThresholdMs = positiveNumberEnv(import.meta.env.VITE_SLOW_RTT_THRESHOLD_MS, 100)
+
+function positiveNumberEnv(raw: unknown, fallback: number) {
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
 
 function endpoint(role: string, name: string, ip: string) {
   return <span className="activity-endpoint">
@@ -23,22 +31,50 @@ function rowKey(item: InternalActivity) {
   return `${item.id}:${item.direction}:${item.observed_at}`
 }
 
-function rowClassName(item: InternalActivity, fresh: boolean) {
+function pairKey(a?: string, b?: string) {
+  if (!a || !b) return ''
+  return [a, b].sort().join('<->')
+}
+
+function buildRTTLookup(graph: GraphData) {
+  const lookup = new Map<string, number>()
+  graph.edges.forEach((edge) => {
+    const rtt = edge.avg_rtt_ms ?? 0
+    if (rtt <= 0) return
+    const vmKey = pairKey(edge.source, edge.target)
+    if (vmKey) lookup.set(vmKey, Math.max(lookup.get(vmKey) ?? 0, rtt))
+    const ipKey = pairKey(edge.source_ip, edge.dest_ip)
+    if (ipKey) lookup.set(ipKey, Math.max(lookup.get(ipKey) ?? 0, rtt))
+  })
+  return lookup
+}
+
+function rttForActivity(item: InternalActivity, lookup: Map<string, number>) {
+  return lookup.get(pairKey(item.source_vm_id, item.destination_vm_id))
+    ?? lookup.get(pairKey(item.source_ip, item.destination_ip))
+    ?? 0
+}
+
+function rowClassName(item: InternalActivity, rtt: number, fresh: boolean) {
   const classes: string[] = []
   if (fresh) classes.push('log-row-fresh')
   if (item.error_count > 0) classes.push('log-row-error')
+  else if (rtt >= slowRTTThresholdMs) classes.push('log-row-warning')
   return classes.length ? classes.join(' ') : undefined
 }
 
 export function InternalActivityTable({
   activity,
+  graph,
   windowLabel,
   limit,
 }: {
   activity: InternalActivity[]
+  graph: GraphData
   windowLabel: string
   limit: number
 }) {
+  const rttLookup = useMemo(() => buildRTTLookup(graph), [graph])
   const signature = useMemo(() => activity.slice(0, 5).map((item) => `${item.id}:${item.observed_at}`).join('|'), [activity])
   const previousSignature = useRef(signature)
   const [fresh, setFresh] = useState(false)
@@ -79,16 +115,17 @@ export function InternalActivityTable({
       </span>
       <span>
         <strong>Debug signal</strong>
-        <small>Errors turn rows red; request/rate counters show current pressure.</small>
+        <small>Errors turn rows red; RTT above {slowRTTThresholdMs} ms turns rows yellow.</small>
       </span>
     </div>
     <div className="activity-table-wrap">
       <table className="activity-table">
-        <thead><tr><th>Observed UTC</th><th>Client → Server</th><th>Service</th><th>Observer side</th><th>Bytes</th><th>Frequency</th><th>Captured by</th></tr></thead>
+        <thead><tr><th>Observed UTC</th><th>Client → Server</th><th>Service</th><th>Observer side</th><th>RTT</th><th>Bytes</th><th>Frequency</th><th>Captured by</th></tr></thead>
         <tbody>
           {activity.map((item) => {
             const key = rowKey(item)
-            return <tr key={`${item.id}-${item.direction}`} className={rowClassName(item, freshRows.has(key))}>
+            const rtt = rttForActivity(item, rttLookup)
+            return <tr key={`${item.id}-${item.direction}`} className={rowClassName(item, rtt, freshRows.has(key))}>
             <td className="activity-time">{activityTime(item.observed_at)}</td>
             <td><div className="activity-route">
               {endpoint('client', item.source_name, item.source_ip)}
@@ -97,6 +134,9 @@ export function InternalActivityTable({
             </div></td>
             <td><span className="service-pill">{item.service}</span><small className="service-port">:{item.service_port}</small></td>
             <td><span className="protocol-pill">{item.protocol}</span><small className="direction-label">agent {item.direction}</small></td>
+            <td><div className="metric-stack compact">
+              <span className={`rtt-value${rtt >= slowRTTThresholdMs ? ' rtt-slow' : ''}`}><strong>{rtt > 0 ? `${rtt.toFixed(2)} ms` : '—'}</strong><small>threshold {slowRTTThresholdMs} ms</small></span>
+            </div></td>
             <td><div className="metric-stack">
               {metric('client → server', formatBytes(item.bytes_sent))}
               {metric('server → client', formatBytes(item.bytes_received))}
@@ -110,7 +150,7 @@ export function InternalActivityTable({
             <td>{endpoint('observer', item.observer_name, item.observer_ip)}</td>
           </tr>
           })}
-          {activity.length === 0 && <tr><td colSpan={7} className="activity-empty">Waiting for internal VM activity…</td></tr>}
+          {activity.length === 0 && <tr><td colSpan={8} className="activity-empty">Waiting for internal VM activity…</td></tr>}
         </tbody>
       </table>
     </div>

@@ -9,6 +9,10 @@ export type FlowTableMode = 'connection' | 'request' | 'l4'
 type RowSeverity = 'normal' | 'warning' | 'error'
 
 const slowRTTThresholdMs = positiveNumberEnv(import.meta.env.VITE_SLOW_RTT_THRESHOLD_MS, 100)
+type EdgeLookup = {
+  edges: Map<string, GraphEdge>
+  pairRTT: Map<string, number>
+}
 
 function positiveNumberEnv(raw: unknown, fallback: number) {
   const parsed = Number(raw)
@@ -73,26 +77,42 @@ function reverseEdgeKey(edge: GraphEdge) {
   return `${edge.target}->${edge.source}:${edge.protocol}:${edge.dst_port}`
 }
 
-function buildEdgeLookup(graph: GraphData) {
-  const lookup = new Map<string, GraphEdge>()
+function pairKey(a?: string, b?: string) {
+  if (!a || !b) return ''
+  return [a, b].sort().join('<->')
+}
+
+function buildEdgeLookup(graph: GraphData): EdgeLookup {
+  const edges = new Map<string, GraphEdge>()
+  const pairRTT = new Map<string, number>()
   graph.edges.forEach((edge) => {
-    lookup.set(edgeKey(edge), edge)
-    lookup.set(reverseEdgeKey(edge), edge)
+    edges.set(edgeKey(edge), edge)
+    edges.set(reverseEdgeKey(edge), edge)
+    const key = pairKey(edge.source, edge.target)
+    if (key && (edge.avg_rtt_ms ?? 0) > 0) {
+      pairRTT.set(key, Math.max(pairRTT.get(key) ?? 0, edge.avg_rtt_ms ?? 0))
+    }
   })
-  return lookup
+  return { edges, pairRTT }
 }
 
-function edgeForFlow(flow: Flow, lookup: Map<string, GraphEdge>) {
+function edgeForFlow(flow: Flow, lookup: EdgeLookup) {
   if (!flow.src_vm_id || !flow.dst_vm_id) return undefined
-  return lookup.get(`${flow.src_vm_id}->${flow.dst_vm_id}:${flow.protocol}:${flow.dst_port}`)
-    || lookup.get(`${flow.dst_vm_id}->${flow.src_vm_id}:${flow.protocol}:${flow.dst_port}`)
-    || lookup.get(`${flow.src_vm_id}->${flow.dst_vm_id}:${flow.protocol}:0`)
-    || lookup.get(`${flow.dst_vm_id}->${flow.src_vm_id}:${flow.protocol}:0`)
+  return lookup.edges.get(`${flow.src_vm_id}->${flow.dst_vm_id}:${flow.protocol}:${flow.dst_port}`)
+    || lookup.edges.get(`${flow.dst_vm_id}->${flow.src_vm_id}:${flow.protocol}:${flow.dst_port}`)
+    || lookup.edges.get(`${flow.src_vm_id}->${flow.dst_vm_id}:${flow.protocol}:0`)
+    || lookup.edges.get(`${flow.dst_vm_id}->${flow.src_vm_id}:${flow.protocol}:0`)
 }
 
-function severity(flow: Flow, edge?: GraphEdge): RowSeverity {
+function rttForFlow(flow: Flow, lookup: EdgeLookup, edge?: GraphEdge) {
+  const edgeRTT = edge?.avg_rtt_ms ?? 0
+  if (edgeRTT > 0) return edgeRTT
+  return lookup.pairRTT.get(pairKey(flow.src_vm_id, flow.dst_vm_id)) ?? 0
+}
+
+function severity(flow: Flow, rtt: number, edge?: GraphEdge): RowSeverity {
   if ((flow.error_count ?? 0) > 0 || edge?.failed) return 'error'
-  if ((edge?.avg_rtt_ms ?? 0) >= slowRTTThresholdMs) return 'warning'
+  if (rtt >= slowRTTThresholdMs) return 'warning'
   return 'normal'
 }
 
@@ -187,10 +207,10 @@ export function FlowTelemetryTable({
         <tbody>
           {rows.map((item, index) => {
             const edge = edgeForFlow(item, edgeLookup)
-            const rowSeverity = severity(item, edge)
+            const rtt = rttForFlow(item, edgeLookup, edge)
+            const rowSeverity = severity(item, rtt, edge)
             const key = flowKey(item)
             const observedAt = item.observed_at || item.last_seen
-            const rtt = edge?.avg_rtt_ms ?? 0
             return <tr key={`${item.id}-${index}`} className={rowClassName(freshRows.has(key), rowSeverity)}>
               <td>{signalBadge(rowSeverity, signal(item, rowSeverity))}</td>
               <td className="activity-time">{formatUTCClock(observedAt)}</td>
@@ -211,9 +231,9 @@ export function FlowTelemetryTable({
                 {metric('errors', `${item.error_count ?? 0}`)}
               </div></td>
               <td><div className="metric-stack">
-                {metric('rtt', rtt > 0 ? `${rtt.toFixed(2)} ms` : '—')}
+                <span className={`rtt-value${rtt >= slowRTTThresholdMs ? ' rtt-slow' : ''}`}><strong>{rtt > 0 ? `${rtt.toFixed(2)} ms` : '—'}</strong><small>RTT / threshold {slowRTTThresholdMs} ms</small></span>
                 {metric('packets', `${item.packets}`)}
-                {metric('state', edge?.failed ? 'failed' : edge?.reachable ? 'reachable' : item.error_count ? 'failed' : 'observed')}
+                {metric('state', edge?.failed ? 'failed' : rtt >= slowRTTThresholdMs ? 'slow' : edge?.reachable ? 'reachable' : item.error_count ? 'failed' : 'observed')}
               </div></td>
               <td><div className="metric-stack compact">
                 {metric('agent id', item.agent_id || '—')}
