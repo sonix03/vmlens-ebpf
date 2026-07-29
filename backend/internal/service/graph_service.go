@@ -127,6 +127,9 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 	if filter.TenantID != "" {
 		add("(sv.tenant_id = $%d OR dv.tenant_id = $%d)", filter.TenantID)
 	}
+	if filter.ProjectID != "" {
+		add("(sv.project_id = $%d OR dv.project_id = $%d)", filter.ProjectID)
+	}
 	if filter.VMID != "" {
 		add("(f.src_vm_id = $%d OR f.dst_vm_id = $%d)", filter.VMID)
 	}
@@ -188,6 +191,9 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 			continue
 		}
 		if filter.TenantID != "" && vm.TenantID != filter.TenantID {
+			continue
+		}
+		if filter.ProjectID != "" && vm.ProjectID != filter.ProjectID {
 			continue
 		}
 		if filter.VMID != "" && vm.ID != filter.VMID {
@@ -417,6 +423,9 @@ func (s *GraphService) connectionProbeRows(ctx context.Context, filter model.Gra
 	}
 	if filter.TenantID != "" {
 		add("(sv.tenant_id = $%d OR dv.tenant_id = $%d)", filter.TenantID)
+	}
+	if filter.ProjectID != "" {
+		add("(sv.project_id = $%d OR dv.project_id = $%d)", filter.ProjectID)
 	}
 	if filter.VMID != "" {
 		add("(p.src_vm_id = $%d OR p.dst_vm_id = $%d)", filter.VMID)

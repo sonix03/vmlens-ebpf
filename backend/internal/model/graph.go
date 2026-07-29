@@ -49,6 +49,7 @@ type GraphEdge struct {
 type GraphFilter struct {
 	AgentID   string
 	TenantID  string
+	ProjectID string
 	VMID      string
 	Scope     string
 	Protocol  string
