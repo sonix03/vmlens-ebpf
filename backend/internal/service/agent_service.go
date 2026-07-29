@@ -65,35 +65,37 @@ func (s *AgentService) Register(ctx context.Context, registration model.AgentReg
 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO vms (
-			id, name, tenant_id, private_ip, public_ip, mac_address,
+			id, name, tenant_id, project_id, private_ip, public_ip, mac_address,
 			discovered_by, agent_id, machine_id, status, first_seen, last_seen
-		) VALUES ($1, $2, $3, $4::inet, $5::inet, $6, 'agent', $7, $8, 'online', NOW(), NOW())
+		) VALUES ($1, $2, $3, $4, $5::inet, $6::inet, $7, 'agent', $8, $9, 'online', NOW(), NOW())
 		ON CONFLICT (id) DO UPDATE SET
 			name = EXCLUDED.name,
 			tenant_id = COALESCE(EXCLUDED.tenant_id, vms.tenant_id),
+			project_id = COALESCE(EXCLUDED.project_id, vms.project_id),
 			private_ip = COALESCE(EXCLUDED.private_ip, vms.private_ip),
 			public_ip = COALESCE(EXCLUDED.public_ip, vms.public_ip),
 			mac_address = COALESCE(EXCLUDED.mac_address, vms.mac_address),
 			agent_id = EXCLUDED.agent_id,
 			machine_id = COALESCE(EXCLUDED.machine_id, vms.machine_id),
 			status = 'online', last_seen = NOW()`,
-		vmID, registration.Hostname, nullIfEmpty(registration.TenantID), nullIfEmpty(primaryIP),
+		vmID, registration.Hostname, nullIfEmpty(registration.TenantID), nullIfEmpty(registration.ProjectID), nullIfEmpty(primaryIP),
 		nullIfEmpty(publicIP), nullIfEmpty(primaryMAC), registration.AgentID, nullIfEmpty(registration.MachineID))
 	if err != nil {
 		return model.RegistrationResult{}, fmt.Errorf("upsert VM: %w", err)
 	}
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO agents (id, vm_id, hostname, machine_id, os, kernel, agent_version, environment, status, first_seen, last_seen)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'online', NOW(), NOW())
+		INSERT INTO agents (id, vm_id, hostname, machine_id, os, kernel, agent_version, environment, project_id, status, first_seen, last_seen)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'online', NOW(), NOW())
 		ON CONFLICT (id) DO UPDATE SET
 			vm_id = EXCLUDED.vm_id, hostname = EXCLUDED.hostname,
 			machine_id = COALESCE(EXCLUDED.machine_id, agents.machine_id),
 			os = EXCLUDED.os, kernel = EXCLUDED.kernel,
 			agent_version = EXCLUDED.agent_version, environment = EXCLUDED.environment,
+			project_id = COALESCE(EXCLUDED.project_id, agents.project_id),
 			status = 'online', last_seen = NOW()`,
 		registration.AgentID, vmID, registration.Hostname, nullIfEmpty(registration.MachineID),
-		nullIfEmpty(registration.OS), nullIfEmpty(registration.Kernel), nullIfEmpty(registration.AgentVersion), nullIfEmpty(registration.Environment))
+		nullIfEmpty(registration.OS), nullIfEmpty(registration.Kernel), nullIfEmpty(registration.AgentVersion), nullIfEmpty(registration.Environment), nullIfEmpty(registration.ProjectID))
 	if err != nil {
 		return model.RegistrationResult{}, fmt.Errorf("upsert agent: %w", err)
 	}

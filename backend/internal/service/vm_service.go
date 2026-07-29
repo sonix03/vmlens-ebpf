@@ -13,10 +13,12 @@ func NewVMService(pool *pgxpool.Pool) *VMService { return &VMService{pool: pool}
 
 func (s *VMService) List(ctx context.Context) ([]model.VM, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, COALESCE(tenant_id, ''), COALESCE(host(private_ip), ''),
-		       COALESCE(host(public_ip), ''), COALESCE(mac_address, ''), COALESCE(host_id, ''),
-		       COALESCE(role, ''), discovered_by, COALESCE(agent_id, ''), COALESCE(machine_id, ''),
-		       status, first_seen, last_seen, created_at
+		SELECT id, name, COALESCE(tenant_id, ''), COALESCE(project_id, ''),
+		       COALESCE(region, ''), COALESCE(zone, ''), COALESCE(host(private_ip), ''),
+		       COALESCE(host(public_ip), ''), COALESCE(network_id, ''), COALESCE(subnet_id, ''),
+		       COALESCE(mac_address, ''), COALESCE(host_id, ''), COALESCE(role, ''),
+		       COALESCE(environment, ''), COALESCE(owner, ''), discovered_by, COALESCE(agent_id, ''),
+		       COALESCE(machine_id, ''), status, first_seen, last_seen, created_at
 		FROM vms ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -26,7 +28,13 @@ func (s *VMService) List(ctx context.Context) ([]model.VM, error) {
 	byID := map[string]int{}
 	for rows.Next() {
 		var vm model.VM
-		if err := rows.Scan(&vm.ID, &vm.Name, &vm.TenantID, &vm.PrivateIP, &vm.PublicIP, &vm.MACAddress, &vm.HostID, &vm.Role, &vm.DiscoveredBy, &vm.AgentID, &vm.MachineID, &vm.Status, &vm.FirstSeen, &vm.LastSeen, &vm.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&vm.ID, &vm.Name, &vm.TenantID, &vm.ProjectID, &vm.Region, &vm.Zone,
+			&vm.PrivateIP, &vm.PublicIP, &vm.NetworkID, &vm.SubnetID, &vm.MACAddress,
+			&vm.HostID, &vm.Role, &vm.Environment, &vm.Owner, &vm.DiscoveredBy,
+			&vm.AgentID, &vm.MachineID, &vm.Status, &vm.FirstSeen, &vm.LastSeen,
+			&vm.CreatedAt,
+		); err != nil {
 			return nil, err
 		}
 		byID[vm.ID] = len(vms)

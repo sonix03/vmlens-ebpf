@@ -7,6 +7,7 @@ type AgentRegistration struct {
 	Hostname     string      `json:"hostname"`
 	MachineID    string      `json:"machine_id,omitempty"`
 	TenantID     string      `json:"tenant_id,omitempty"`
+	ProjectID    string      `json:"project_id,omitempty"`
 	PrivateIPs   []string    `json:"private_ips,omitempty"`
 	PublicIP     *string     `json:"public_ip,omitempty"`
 	MACAddresses []string    `json:"mac_addresses,omitempty"`
