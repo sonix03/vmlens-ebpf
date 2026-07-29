@@ -54,6 +54,7 @@ type VisualRelationship = {
   connectionCount: number
   requestCount: number
   errorCount: number
+  retransmissionCount: number
   avgRTTMs: number
   p95RTTMs: number
   avgResponseDurationMs: number
@@ -383,6 +384,7 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect }: Props) {
         connectionCount: 0,
         requestCount: 0,
         errorCount: 0,
+        retransmissionCount: 0,
         avgRTTMs: 0,
         p95RTTMs: 0,
         avgResponseDurationMs: 0,
@@ -434,10 +436,11 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect }: Props) {
         current.connectionCount += edge.connection_count ?? 0
         current.requestCount += edge.request_count ?? 0
         current.errorCount += edge.error_count ?? 0
+        current.retransmissionCount += edge.retransmission_count ?? 0
       }
       current.avgRTTMs = Math.max(current.avgRTTMs, edge.avg_rtt_ms ?? 0)
       current.p95RTTMs = Math.max(current.p95RTTMs, edge.p95_rtt_ms ?? 0)
-      current.avgResponseDurationMs = Math.max(current.avgResponseDurationMs, edge.avg_response_duration_ms ?? 0)
+      current.avgResponseDurationMs = Math.max(current.avgResponseDurationMs, edge.avg_response_duration_ms ?? edge.avg_app_delay_ms ?? 0)
       if (edge.last_response_code !== undefined) {
         current.lastResponseCode = edge.last_response_code
       }
@@ -503,6 +506,7 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect }: Props) {
         slow,
         request_count: relationship.requestCount,
         error_count: relationship.errorCount,
+        retransmission_count: relationship.retransmissionCount,
         total_bytes: relationship.totalBytes,
         packets: relationship.packets,
         connection_count: relationship.connectionCount,

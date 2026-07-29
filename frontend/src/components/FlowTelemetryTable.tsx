@@ -31,6 +31,14 @@ function metric(label: string, value: string) {
   return <span><strong>{value}</strong><small>{label}</small></span>
 }
 
+function numberValue(value?: number) {
+  return (value ?? 0).toLocaleString()
+}
+
+function latencyValue(value?: number) {
+  return value && value > 0 ? `${value.toFixed(2)} ms` : '—'
+}
+
 function tableTitle(mode: FlowTableMode) {
   switch (mode) {
     case 'connection':
@@ -202,46 +210,53 @@ export function FlowTelemetryTable({
       </span>)}
     </div>
     <div className="activity-table-wrap">
-      <table className="activity-table telemetry-table">
-        <thead><tr><th>Signal</th><th>Observed UTC</th><th>Source → Destination</th><th>Protocol</th><th>Traffic bytes</th><th>Counters</th><th>Health evidence</th><th>Agent</th></tr></thead>
+      <table className="activity-table telemetry-table telemetry-metrics-table">
+        <thead><tr>
+          <th>Signal</th>
+          <th>Observed UTC</th>
+          <th>Source</th>
+          <th>Destination</th>
+          <th>Protocol</th>
+          <th>Sent</th>
+          <th>Received</th>
+          <th>Packets</th>
+          <th>Connections</th>
+          <th>Requests</th>
+          <th>Errors</th>
+          <th>Retrans</th>
+          <th>RTT</th>
+          <th>App delay</th>
+          <th>Agent</th>
+        </tr></thead>
         <tbody>
           {rows.map((item, index) => {
             const edge = edgeForFlow(item, edgeLookup)
-            const rtt = rttForFlow(item, edgeLookup, edge)
+            const rtt = item.avg_rtt_ms && item.avg_rtt_ms > 0 ? item.avg_rtt_ms : rttForFlow(item, edgeLookup, edge)
             const rowSeverity = severity(item, rtt, edge)
             const key = flowKey(item)
             const observedAt = item.observed_at || item.last_seen
             return <tr key={`${item.id}-${index}`} className={rowClassName(freshRows.has(key), rowSeverity)}>
               <td>{signalBadge(rowSeverity, signal(item, rowSeverity))}</td>
               <td className="activity-time">{formatUTCClock(observedAt)}</td>
-              <td><div className="activity-route">
-                {endpoint('source', item.src_ip, `port ${item.src_port || '—'}`)}
-                <span className="activity-arrow">→</span>
-                {endpoint('destination', item.dst_ip, `port ${item.dst_port || '—'}`)}
-              </div></td>
-              <td><span className="protocol-pill">{item.protocol || 'L4'}</span><small className="direction-label">{item.scope}</small></td>
-              <td><div className="metric-stack">
-                {metric('sent', formatBytes(item.bytes_sent))}
-                {metric('received', formatBytes(item.bytes_received))}
-                {metric('total', formatBytes(item.bytes_sent + item.bytes_received))}
-              </div></td>
-              <td><div className="metric-stack">
-                {metric('connections', `${item.connection_count ?? 0}`)}
-                {metric('requests', `${item.request_count ?? 0}`)}
-                {metric('errors', `${item.error_count ?? 0}`)}
-              </div></td>
-              <td><div className="metric-stack">
-                <span className={`rtt-value${rtt >= slowRTTThresholdMs ? ' rtt-slow' : ''}`}><strong>{rtt > 0 ? `${rtt.toFixed(2)} ms` : '—'}</strong><small>RTT / threshold {slowRTTThresholdMs} ms</small></span>
-                {metric('packets', `${item.packets}`)}
-                {metric('state', edge?.failed ? 'failed' : rtt >= slowRTTThresholdMs ? 'slow' : edge?.reachable ? 'reachable' : item.error_count ? 'failed' : 'observed')}
-              </div></td>
+              <td>{endpoint('source', item.src_ip, `port ${item.src_port || '—'}`)}</td>
+              <td>{endpoint('destination', item.dst_ip, `port ${item.dst_port || '—'}`)}</td>
+              <td><span className="protocol-pill">{item.protocol || 'L4'}</span><small className="direction-label">{item.direction} · {item.scope}</small></td>
+              <td className="metric-number">{formatBytes(item.bytes_sent)}</td>
+              <td className="metric-number">{formatBytes(item.bytes_received)}</td>
+              <td className="metric-number">{numberValue(item.packets)}</td>
+              <td className="metric-number">{numberValue(item.connection_count)}</td>
+              <td className="metric-number">{numberValue(item.request_count)}</td>
+              <td className={`metric-number${(item.error_count ?? 0) > 0 ? ' metric-error' : ''}`}>{numberValue(item.error_count)}</td>
+              <td className={`metric-number${(item.retransmission_count ?? 0) > 0 ? ' metric-warning' : ''}`}>{numberValue(item.retransmission_count)}</td>
+              <td className={`metric-number rtt-value${rtt >= slowRTTThresholdMs ? ' rtt-slow' : ''}`}>{latencyValue(rtt)}</td>
+              <td className="metric-number">{latencyValue(item.avg_app_delay_ms)}</td>
               <td><div className="metric-stack compact">
                 {metric('agent id', item.agent_id || '—')}
                 {metric('interface', item.interface_name || '—')}
               </div></td>
             </tr>
           })}
-          {rows.length === 0 && <tr><td colSpan={8} className="activity-empty">Waiting for TC/eBPF {mode} telemetry…</td></tr>}
+          {rows.length === 0 && <tr><td colSpan={15} className="activity-empty">Waiting for TC/eBPF {mode} telemetry…</td></tr>}
         </tbody>
       </table>
     </div>

@@ -3,10 +3,10 @@ package packet
 import (
 	"context"
 
-	telemetry "github.com/vmlens/vmlens/agent/internal/exporter"
+	"github.com/vmlens/vmlens/agent/internal/pipeline"
 )
 
 type Collector interface {
-	Run(context.Context) (<-chan telemetry.FlowEvent, <-chan error)
+	Run(context.Context) (<-chan pipeline.FlowMetric, <-chan error)
 	Close() error
 }

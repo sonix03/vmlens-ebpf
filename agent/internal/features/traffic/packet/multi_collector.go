@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	telemetry "github.com/vmlens/vmlens/agent/internal/exporter"
+	"github.com/vmlens/vmlens/agent/internal/pipeline"
 )
 
 type MultiCollector struct {
@@ -15,8 +15,8 @@ func NewMulti(collectors ...Collector) *MultiCollector {
 	return &MultiCollector{collectors: collectors}
 }
 
-func (c *MultiCollector) Run(ctx context.Context) (<-chan telemetry.FlowEvent, <-chan error) {
-	events := make(chan telemetry.FlowEvent, 1024)
+func (c *MultiCollector) Run(ctx context.Context) (<-chan pipeline.FlowMetric, <-chan error) {
+	events := make(chan pipeline.FlowMetric, 1024)
 	errorsChannel := make(chan error, len(c.collectors))
 	var wg sync.WaitGroup
 

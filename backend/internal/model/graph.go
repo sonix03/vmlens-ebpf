@@ -32,6 +32,7 @@ type GraphEdge struct {
 	ConnectionCount int64      `json:"connection_count"`
 	RequestCount    int64      `json:"request_count"`
 	ErrorCount      int64      `json:"error_count"`
+	Retransmissions int64      `json:"retransmission_count"`
 	FirstSeen       time.Time  `json:"first_seen"`
 	LastSeen        time.Time  `json:"last_seen"`
 	LastObservedAt  time.Time  `json:"last_observed_at"`
@@ -44,6 +45,7 @@ type GraphEdge struct {
 	Kind            string     `json:"kind,omitempty"`
 	Reachable       bool       `json:"reachable,omitempty"`
 	AvgRTTMs        float64    `json:"avg_rtt_ms,omitempty"`
+	AvgAppDelayMs   float64    `json:"avg_app_delay_ms,omitempty"`
 }
 
 type GraphFilter struct {

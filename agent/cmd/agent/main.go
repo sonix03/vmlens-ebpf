@@ -19,6 +19,7 @@ import (
 	"github.com/vmlens/vmlens/agent/internal/flow"
 	"github.com/vmlens/vmlens/agent/internal/identity"
 	"github.com/vmlens/vmlens/agent/internal/lifecycle"
+	"github.com/vmlens/vmlens/agent/internal/pipeline"
 	"github.com/vmlens/vmlens/agent/internal/probe"
 )
 
@@ -84,7 +85,7 @@ func run() error {
 	flowTicker := time.NewTicker(cfg.FlowInterval)
 	defer flowTicker.Stop()
 	pendingFlows := flow.NewAccumulator()
-	flowBatches := make(chan []exporter.FlowEvent, 32)
+	flowBatches := make(chan []flow.State, 32)
 	go runFlowSender(ctx, client, flowBatches, cfg.FlowDebug)
 	for events != nil || collectorErrors != nil {
 		select {
@@ -137,17 +138,18 @@ func run() error {
 	return nil
 }
 
-func runFlowSender(ctx context.Context, client *exporter.Sender, batches <-chan []exporter.FlowEvent, debug bool) {
+func runFlowSender(ctx context.Context, client *exporter.Sender, batches <-chan []flow.State, debug bool) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case batch := <-batches:
-			for _, event := range batch {
+			for _, state := range batch {
+				event := exporter.FromFlowState(state)
 				if err := sendFlow(ctx, client, event); err != nil {
 					log.Printf("send aggregated flow: %v", err)
 				} else if debug {
-					log.Print(flow.DescribeEvent("exported", event))
+					log.Print(flow.DescribeState("exported", state))
 				}
 			}
 		}
@@ -194,7 +196,7 @@ func (f endpointFilter) matches(ip string) bool {
 	return excluded
 }
 
-func ignoreFlow(controlPlane endpointFilter, event exporter.FlowEvent, ignoredPorts []int) bool {
+func ignoreFlow(controlPlane endpointFilter, event pipeline.FlowMetric, ignoredPorts []int) bool {
 	address := net.ParseIP(event.DstIP)
 	if address == nil || address.IsUnspecified() || address.IsLoopback() {
 		return true
@@ -237,7 +239,7 @@ func newFlowFilter(rawAllow, rawDeny []string) (flowFilter, error) {
 	return flowFilter{allow: allow, deny: deny}, nil
 }
 
-func (f flowFilter) allows(event exporter.FlowEvent) bool {
+func (f flowFilter) allows(event pipeline.FlowMetric) bool {
 	src, srcOK := parseAddr(event.SrcIP)
 	dst, dstOK := parseAddr(event.DstIP)
 	if !srcOK && !dstOK {

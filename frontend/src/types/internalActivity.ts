@@ -26,6 +26,9 @@ export interface InternalActivity {
   connection_count: number
   request_count: number
   error_count: number
+  retransmission_count?: number
+  avg_rtt_ms?: number
+  avg_app_delay_ms?: number
   requests_per_second: number
   connections_per_second: number
   first_seen: string

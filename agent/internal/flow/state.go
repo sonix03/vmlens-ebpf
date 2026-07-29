@@ -1,6 +1,8 @@
 package flow
 
 import (
+	"time"
+
 	"github.com/vmlens/vmlens/agent/internal/features/classification"
 	"github.com/vmlens/vmlens/agent/internal/features/protocols/transport/tcp/connection"
 	"github.com/vmlens/vmlens/agent/internal/features/protocols/transport/tcp/retrans"
@@ -12,11 +14,13 @@ import (
 
 type State struct {
 	Key            Key
+	SrcPort        int
 	Traffic        TrafficState
 	TCP            TCPState
+	Application    ApplicationState
 	Classification classification.Model
-	FirstSeenNS    uint64
-	LastSeenNS     uint64
+	FirstSeen      time.Time
+	LastSeen       time.Time
 }
 
 type TrafficState struct {
@@ -29,4 +33,9 @@ type TCPState struct {
 	Connection connection.Model
 	RTT        rtt.Model
 	Retrans    retrans.Model
+}
+
+type ApplicationState struct {
+	AvgDelayMs float64
+	Samples    uint64
 }

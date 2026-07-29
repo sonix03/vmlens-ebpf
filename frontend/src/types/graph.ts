@@ -28,6 +28,7 @@ export interface GraphEdge {
   packets: number
   connection_count: number
   request_count: number
+  retransmission_count?: number
   first_seen: string
   last_seen: string
   last_observed_at: string
@@ -48,6 +49,7 @@ export interface GraphEdge {
   last_error_at?: string
   total_bytes?: number
   avg_rtt_ms?: number
+  avg_app_delay_ms?: number
   p95_rtt_ms?: number
   avg_response_duration_ms?: number
   last_response_code?: number
@@ -77,6 +79,7 @@ export interface ConnectionSummary {
   slow: boolean
   request_count: number
   error_count: number
+  retransmission_count?: number
   total_bytes: number
   packets: number
   connection_count: number

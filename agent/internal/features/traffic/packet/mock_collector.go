@@ -9,6 +9,7 @@ import (
 	telemetry "github.com/vmlens/vmlens/agent/internal/exporter"
 	"github.com/vmlens/vmlens/agent/internal/features/classification"
 	"github.com/vmlens/vmlens/agent/internal/features/traffic/direction"
+	"github.com/vmlens/vmlens/agent/internal/pipeline"
 )
 
 type mockDestination struct {
@@ -27,8 +28,8 @@ func NewMock(registration telemetry.Registration, interval time.Duration) *MockC
 	return &MockCollector{registration: registration, interval: interval, random: rand.New(rand.NewSource(time.Now().UnixNano()))}
 }
 
-func (c *MockCollector) Run(ctx context.Context) (<-chan telemetry.FlowEvent, <-chan error) {
-	events := make(chan telemetry.FlowEvent, 64)
+func (c *MockCollector) Run(ctx context.Context) (<-chan pipeline.FlowMetric, <-chan error) {
+	events := make(chan pipeline.FlowMetric, 64)
 	errors := make(chan error)
 	go func() {
 		defer close(events)
@@ -49,7 +50,7 @@ func (c *MockCollector) Run(ctx context.Context) (<-chan telemetry.FlowEvent, <-
 
 func (c *MockCollector) Close() error { return nil }
 
-func (c *MockCollector) event(now time.Time) telemetry.FlowEvent {
+func (c *MockCollector) event(now time.Time) pipeline.FlowMetric {
 	destinations := c.destinations()
 	destination := destinations[c.random.Intn(len(destinations))]
 	bytesReceived := int64(25_000 + c.random.Intn(2_500_000))
@@ -63,11 +64,11 @@ func (c *MockCollector) event(now time.Time) telemetry.FlowEvent {
 	if len(c.registration.Interfaces) > 0 {
 		iface = c.registration.Interfaces[0].Name
 	}
-	return telemetry.FlowEvent{
+	return pipeline.FlowMetric{
 		AgentID: c.registration.AgentID, SrcIP: sourceIP, DstIP: destination.ip,
 		SrcPort: 32000 + c.random.Intn(25000), DstPort: destination.port,
-		Protocol: destination.protocol, Direction: direction.Egress, BytesSent: bytesSent,
-		BytesReceived: bytesReceived, Packets: (bytesSent+bytesReceived)/1200 + 1,
+		Protocol: destination.protocol, Direction: direction.Egress, Source: "mock",
+		ByteCount: bytesSent + bytesReceived, PacketCount: (bytesSent+bytesReceived)/1200 + 1,
 		ConnectionCount: connections, RequestCount: connections, FirstSeen: now.Add(-time.Duration(100+c.random.Intn(900)) * time.Millisecond),
 		LastSeen: now, Interface: iface,
 	}

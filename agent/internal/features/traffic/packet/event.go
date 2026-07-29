@@ -1,6 +1,6 @@
 package packet
 
-import telemetry "github.com/vmlens/vmlens/agent/internal/exporter"
+import "github.com/vmlens/vmlens/agent/internal/pipeline"
 
-type Event = telemetry.FlowEvent
+type Event = pipeline.FlowMetric
 type RawEvent = rawFlowEvent

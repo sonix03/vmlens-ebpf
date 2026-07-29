@@ -16,6 +16,9 @@ type FlowEvent struct {
 	ConnectionCount int64     `json:"connection_count"`
 	RequestCount    int64     `json:"request_count"`
 	ErrorCount      int64     `json:"error_count"`
+	Retransmissions int64     `json:"retransmission_count"`
+	AvgRTTMs        float64   `json:"avg_rtt_ms"`
+	AvgAppDelayMs   float64   `json:"avg_app_delay_ms"`
 	FirstSeen       time.Time `json:"first_seen"`
 	LastSeen        time.Time `json:"last_seen"`
 	Interface       string    `json:"interface"`
@@ -41,6 +44,9 @@ type Flow struct {
 	ConnectionCount   int64      `json:"connection_count"`
 	RequestCount      int64      `json:"request_count"`
 	ErrorCount        int64      `json:"error_count"`
+	Retransmissions   int64      `json:"retransmission_count"`
+	AvgRTTMs          float64    `json:"avg_rtt_ms"`
+	AvgAppDelayMs     float64    `json:"avg_app_delay_ms"`
 	RequestsPerSec    float64    `json:"requests_per_second"`
 	ConnectionsPerSec float64    `json:"connections_per_second"`
 	FirstSeen         time.Time  `json:"first_seen"`
@@ -77,6 +83,9 @@ type InternalActivity struct {
 	ConnectionCount   int64     `json:"connection_count"`
 	RequestCount      int64     `json:"request_count"`
 	ErrorCount        int64     `json:"error_count"`
+	Retransmissions   int64     `json:"retransmission_count"`
+	AvgRTTMs          float64   `json:"avg_rtt_ms"`
+	AvgAppDelayMs     float64   `json:"avg_app_delay_ms"`
 	RequestsPerSec    float64   `json:"requests_per_second"`
 	ConnectionsPerSec float64   `json:"connections_per_second"`
 	FirstSeen         time.Time `json:"first_seen"`

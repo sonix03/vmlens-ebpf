@@ -26,7 +26,7 @@ func TestICMPCollectorParsesEgressPing(t *testing.T) {
 	if event.SrcIP != "10.20.20.130" || event.DstIP != "10.20.20.249" {
 		t.Fatalf("unexpected route: %s -> %s", event.SrcIP, event.DstIP)
 	}
-	if event.BytesSent == 0 || event.BytesReceived != 0 || event.RequestCount != 1 || event.DstPort != 0 {
+	if event.ByteCount == 0 || event.PacketCount != 1 || event.RequestCount != 1 || event.DstPort != 0 {
 		t.Fatalf("unexpected counters: %+v", event)
 	}
 }
@@ -43,7 +43,7 @@ func TestICMPCollectorParsesIngressFromLocalPerspective(t *testing.T) {
 	if event.SrcIP != "10.20.20.249" || event.DstIP != "10.20.20.130" {
 		t.Fatalf("unexpected local-perspective route: %s -> %s", event.SrcIP, event.DstIP)
 	}
-	if event.BytesReceived == 0 || event.BytesSent != 0 || event.RequestCount != 1 {
+	if event.ByteCount == 0 || event.PacketCount != 1 || event.RequestCount != 1 {
 		t.Fatalf("unexpected counters: %+v", event)
 	}
 }

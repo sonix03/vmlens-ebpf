@@ -101,11 +101,13 @@ func (s *FlowService) Ingest(ctx context.Context, event model.FlowEvent) (model.
 			INSERT INTO network_flows (
 				agent_id, src_vm_id, dst_vm_id, src_ip, dst_ip, src_port, dst_port,
 				protocol, direction, scope, bytes_sent, bytes_received, packets, connection_count,
-				request_count, error_count, first_seen, last_seen, last_error_at, interface_name
-			) VALUES ($1, $2, $3, $4::inet, $5::inet, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+				request_count, error_count, retransmission_count, avg_rtt_ms, avg_app_delay_ms,
+				first_seen, last_seen, last_error_at, interface_name
+			) VALUES ($1, $2, $3, $4::inet, $5::inet, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
 			RETURNING id::text`, event.AgentID, source.ID, destinationID, event.SrcIP, event.DstIP,
 			event.SrcPort, event.DstPort, event.Protocol, event.Direction, scope, event.BytesSent, event.BytesReceived,
-			event.Packets, event.ConnectionCount, event.RequestCount, event.ErrorCount, event.FirstSeen, event.LastSeen,
+			event.Packets, event.ConnectionCount, event.RequestCount, event.ErrorCount, event.Retransmissions, event.AvgRTTMs, event.AvgAppDelayMs,
+			event.FirstSeen, event.LastSeen,
 			flowmetrics.LastErrorAtArg(event.ErrorCount, observedAt), nullIfEmpty(event.Interface)).Scan(&flowID)
 	} else {
 		_, err = tx.Exec(ctx, `
@@ -116,18 +118,29 @@ func (s *FlowService) Ingest(ctx context.Context, event model.FlowEvent) (model.
 				connection_count = connection_count + $5,
 				request_count = request_count + $6,
 				error_count = error_count + $7,
-				first_seen = LEAST(first_seen, $8),
-				last_seen = GREATEST(last_seen, $9),
-				agent_id = $10,
-				interface_name = COALESCE($11, interface_name),
+				retransmission_count = retransmission_count + $8,
+				avg_rtt_ms = CASE
+					WHEN $9 > 0 AND avg_rtt_ms > 0 THEN (avg_rtt_ms + $9) / 2
+					WHEN $9 > 0 THEN $9
+					ELSE avg_rtt_ms
+				END,
+				avg_app_delay_ms = CASE
+					WHEN $10 > 0 AND avg_app_delay_ms > 0 THEN (avg_app_delay_ms + $10) / 2
+					WHEN $10 > 0 THEN $10
+					ELSE avg_app_delay_ms
+				END,
+				first_seen = LEAST(first_seen, $11),
+				last_seen = GREATEST(last_seen, $12),
+				agent_id = $13,
+				interface_name = COALESCE($14, interface_name),
 				last_error_at = CASE
-					WHEN $7 > 0 THEN GREATEST(COALESCE(last_error_at, $12), $12)
+					WHEN $7 > 0 THEN GREATEST(COALESCE(last_error_at, $15), $15)
 					ELSE last_error_at
 				END,
-				observed_at = $12
+				observed_at = $15
 			WHERE id = $1::uuid`, flowID, event.BytesSent, event.BytesReceived, event.Packets,
-			event.ConnectionCount, event.RequestCount, event.ErrorCount, event.FirstSeen, event.LastSeen,
-			event.AgentID, nullIfEmpty(event.Interface), observedAt)
+			event.ConnectionCount, event.RequestCount, event.ErrorCount, event.Retransmissions, event.AvgRTTMs, event.AvgAppDelayMs,
+			event.FirstSeen, event.LastSeen, event.AgentID, nullIfEmpty(event.Interface), observedAt)
 	}
 	if err != nil {
 		return model.Flow{}, fmt.Errorf("aggregate flow: %w", err)
@@ -136,12 +149,14 @@ func (s *FlowService) Ingest(ctx context.Context, event model.FlowEvent) (model.
 		INSERT INTO flow_observations (
 			flow_id, agent_id, src_vm_id, dst_vm_id, src_ip, dst_ip, src_port, dst_port,
 			protocol, direction, scope, bytes_sent, bytes_received, packets, connection_count,
-			request_count, error_count, first_seen, last_seen, observed_at
-		) VALUES ($1::uuid, $2, $3, $4, $5::inet, $6::inet, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+			request_count, error_count, retransmission_count, avg_rtt_ms, avg_app_delay_ms,
+			first_seen, last_seen, observed_at
+		) VALUES ($1::uuid, $2, $3, $4, $5::inet, $6::inet, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
 		flowID, event.AgentID, source.ID, destinationID, event.SrcIP, event.DstIP,
 		event.SrcPort, event.DstPort, event.Protocol, event.Direction, scope,
 		event.BytesSent, event.BytesReceived, event.Packets, event.ConnectionCount,
-		event.RequestCount, event.ErrorCount, event.FirstSeen, event.LastSeen, observedAt); err != nil {
+		event.RequestCount, event.ErrorCount, event.Retransmissions, event.AvgRTTMs, event.AvgAppDelayMs,
+		event.FirstSeen, event.LastSeen, observedAt); err != nil {
 		return model.Flow{}, fmt.Errorf("record flow observation: %w", err)
 	}
 
@@ -162,6 +177,7 @@ func (s *FlowService) Ingest(ctx context.Context, event model.FlowEvent) (model.
 		Protocol: event.Protocol, Direction: event.Direction, Scope: scope, Service: serviceName, ServicePort: servicePort, BytesSent: event.BytesSent,
 		BytesReceived: event.BytesReceived, Packets: event.Packets,
 		ConnectionCount: event.ConnectionCount, RequestCount: event.RequestCount, ErrorCount: event.ErrorCount,
+		Retransmissions: event.Retransmissions, AvgRTTMs: event.AvgRTTMs, AvgAppDelayMs: event.AvgAppDelayMs,
 		RequestsPerSec:    flowmetrics.RatePerSecond(event.RequestCount, event.FirstSeen, event.LastSeen),
 		ConnectionsPerSec: flowmetrics.RatePerSecond(event.ConnectionCount, event.FirstSeen, event.LastSeen),
 		FirstSeen:         event.FirstSeen,
@@ -182,7 +198,8 @@ func (s *FlowService) List(ctx context.Context, limit int) ([]model.Flow, error)
 		SELECT id::text, COALESCE(agent_id, ''), COALESCE(src_vm_id, ''), COALESCE(dst_vm_id, ''),
 		       host(src_ip), host(dst_ip), COALESCE(src_port, 0), COALESCE(dst_port, 0),
 		       protocol, direction, scope, bytes_sent, bytes_received, packets, connection_count,
-		       request_count, error_count, first_seen, last_seen, observed_at, last_error_at, COALESCE(interface_name, ''), created_at
+		       request_count, error_count, retransmission_count, avg_rtt_ms, avg_app_delay_ms,
+		       first_seen, last_seen, observed_at, last_error_at, COALESCE(interface_name, ''), created_at
 		FROM network_flows ORDER BY observed_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -194,7 +211,8 @@ func (s *FlowService) List(ctx context.Context, limit int) ([]model.Flow, error)
 		var lastErrorAt sql.NullTime
 		if err := rows.Scan(&flow.ID, &flow.AgentID, &flow.SrcVMID, &flow.DstVMID, &flow.SrcIP, &flow.DstIP,
 			&flow.SrcPort, &flow.DstPort, &flow.Protocol, &flow.Direction, &flow.Scope, &flow.BytesSent, &flow.BytesReceived,
-			&flow.Packets, &flow.ConnectionCount, &flow.RequestCount, &flow.ErrorCount, &flow.FirstSeen, &flow.LastSeen,
+			&flow.Packets, &flow.ConnectionCount, &flow.RequestCount, &flow.ErrorCount, &flow.Retransmissions,
+			&flow.AvgRTTMs, &flow.AvgAppDelayMs, &flow.FirstSeen, &flow.LastSeen,
 			&flow.ObservedAt, &lastErrorAt, &flow.InterfaceName, &flow.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -227,7 +245,9 @@ func (s *FlowService) ListInternalActivity(ctx context.Context, limit int, windo
 		SELECT f.id::text, f.src_vm_id, COALESCE(observer.name, ''), host(f.src_ip),
 		       f.dst_vm_id, COALESCE(peer.name, ''), host(f.dst_ip),
 		       COALESCE(f.src_port, 0), COALESCE(f.dst_port, 0), f.protocol, f.direction, f.scope,
-		       f.bytes_sent, f.bytes_received, f.connection_count, f.request_count, f.error_count, f.first_seen, f.last_seen, f.observed_at
+		       f.bytes_sent, f.bytes_received, f.connection_count, f.request_count, f.error_count,
+		       f.retransmission_count, f.avg_rtt_ms, f.avg_app_delay_ms,
+		       f.first_seen, f.last_seen, f.observed_at
 		FROM flow_observations f
 		JOIN vms observer ON observer.id = f.src_vm_id
 		JOIN vms peer ON peer.id = f.dst_vm_id
@@ -257,7 +277,8 @@ func (s *FlowService) ListInternalActivity(ctx context.Context, limit int, windo
 			&activity.PeerVMID, &activity.PeerName, &activity.PeerIP,
 			&activity.LocalPort, &activity.PeerPort, &activity.Protocol, &activity.Direction, &activity.Scope,
 			&activity.BytesSent, &activity.BytesReceived, &activity.ConnectionCount, &activity.RequestCount,
-			&activity.ErrorCount, &activity.FirstSeen, &activity.LastSeen, &activity.ObservedAt,
+			&activity.ErrorCount, &activity.Retransmissions, &activity.AvgRTTMs, &activity.AvgAppDelayMs,
+			&activity.FirstSeen, &activity.LastSeen, &activity.ObservedAt,
 		); err != nil {
 			return nil, err
 		}

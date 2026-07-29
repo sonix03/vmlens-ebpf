@@ -3,7 +3,6 @@ package connection
 import (
 	"testing"
 
-	telemetry "github.com/vmlens/vmlens/agent/internal/exporter"
 	"github.com/vmlens/vmlens/agent/internal/features/classification"
 	flowbytes "github.com/vmlens/vmlens/agent/internal/features/traffic/bytes"
 	"github.com/vmlens/vmlens/agent/internal/features/traffic/direction"
@@ -25,16 +24,16 @@ func TestInferRequestCount(t *testing.T) {
 }
 
 func TestApplyDirectionalBytes(t *testing.T) {
-	egress := telemetry.FlowEvent{Direction: direction.Egress}
-	flowbytes.ApplyDirectionalBytes(&egress, 42)
-	if egress.BytesSent != 42 || egress.BytesReceived != 0 {
-		t.Fatalf("egress bytes = sent %d received %d", egress.BytesSent, egress.BytesReceived)
+	var egress flowbytes.Model
+	flowbytes.Apply(&egress, direction.Egress, 42)
+	if egress.Sent != 42 || egress.Received != 0 {
+		t.Fatalf("egress bytes = sent %d received %d", egress.Sent, egress.Received)
 	}
 
-	ingress := telemetry.FlowEvent{Direction: direction.Ingress}
-	flowbytes.ApplyDirectionalBytes(&ingress, 55)
-	if ingress.BytesReceived != 55 || ingress.BytesSent != 0 {
-		t.Fatalf("ingress bytes = sent %d received %d", ingress.BytesSent, ingress.BytesReceived)
+	var ingress flowbytes.Model
+	flowbytes.Apply(&ingress, direction.Ingress, 55)
+	if ingress.Received != 55 || ingress.Sent != 0 {
+		t.Fatalf("ingress bytes = sent %d received %d", ingress.Sent, ingress.Received)
 	}
 }
 

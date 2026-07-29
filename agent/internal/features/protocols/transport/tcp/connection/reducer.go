@@ -23,3 +23,22 @@ func InferRequestCount(protocol, flowDirection string, bytes int64, connections 
 	}
 	return 0
 }
+
+func Apply(model *Model, event Event) {
+	if model == nil {
+		return
+	}
+	if event.Connections > 0 {
+		model.OpenCount += uint64(event.Connections)
+	}
+	if event.Errors > 0 {
+		model.ErrorCount += uint64(event.Errors)
+	}
+	requests := int64(event.Requests)
+	if requests == 0 {
+		requests = InferRequestCount(event.Protocol, event.Direction, event.Bytes, event.Connections, event.Errors)
+	}
+	if requests > 0 {
+		model.RequestHint += uint64(requests)
+	}
+}

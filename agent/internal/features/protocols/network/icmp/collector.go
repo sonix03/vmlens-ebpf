@@ -14,8 +14,8 @@ import (
 
 	telemetry "github.com/vmlens/vmlens/agent/internal/exporter"
 	"github.com/vmlens/vmlens/agent/internal/features/classification"
-	flowbytes "github.com/vmlens/vmlens/agent/internal/features/traffic/bytes"
 	"github.com/vmlens/vmlens/agent/internal/features/traffic/direction"
+	"github.com/vmlens/vmlens/agent/internal/pipeline"
 )
 
 const (
@@ -57,8 +57,8 @@ func NewCollector(registration telemetry.Registration, ifaceName string) (*Colle
 	return &Collector{registration: registration, ifaceName: ifaceName, fd: fd}, nil
 }
 
-func (c *Collector) Run(ctx context.Context) (<-chan telemetry.FlowEvent, <-chan error) {
-	events := make(chan telemetry.FlowEvent, 256)
+func (c *Collector) Run(ctx context.Context) (<-chan pipeline.FlowMetric, <-chan error) {
+	events := make(chan pipeline.FlowMetric, 256)
 	errorsChannel := make(chan error, 4)
 	go func() {
 		defer close(events)
@@ -101,9 +101,9 @@ func (c *Collector) Close() error {
 	return err
 }
 
-func (c *Collector) parse(packet []byte, sockaddr unix.Sockaddr) (telemetry.FlowEvent, bool) {
+func (c *Collector) parse(packet []byte, sockaddr unix.Sockaddr) (pipeline.FlowMetric, bool) {
 	if len(packet) < ethernetHeaderLen {
-		return telemetry.FlowEvent{}, false
+		return pipeline.FlowMetric{}, false
 	}
 	flowDirection := direction.Ingress
 	if linkLayer, ok := sockaddr.(*unix.SockaddrLinklayer); ok && linkLayer.Pkttype == packetOutgoing {
@@ -118,29 +118,30 @@ func (c *Collector) parse(packet []byte, sockaddr unix.Sockaddr) (telemetry.Flow
 	case ethPIPv6:
 		sourceIP, destinationIP = parseIPv6ICMP(packet[ethernetHeaderLen:])
 	default:
-		return telemetry.FlowEvent{}, false
+		return pipeline.FlowMetric{}, false
 	}
 	if sourceIP == "" || destinationIP == "" {
-		return telemetry.FlowEvent{}, false
+		return pipeline.FlowMetric{}, false
 	}
 
 	if flowDirection == direction.Ingress {
 		sourceIP, destinationIP = destinationIP, sourceIP
 	}
 	now := time.Now().UTC()
-	event := telemetry.FlowEvent{
+	event := pipeline.FlowMetric{
 		AgentID:      c.registration.AgentID,
 		SrcIP:        sourceIP,
 		DstIP:        destinationIP,
 		Protocol:     classification.ProtocolICMP,
 		Direction:    flowDirection,
-		Packets:      1,
+		ByteCount:    int64(len(packet)),
+		PacketCount:  1,
 		RequestCount: 1,
+		Source:       "packet_socket_icmp",
 		FirstSeen:    now,
 		LastSeen:     now,
 		Interface:    c.ifaceName,
 	}
-	flowbytes.ApplyDirectionalBytes(&event, int64(len(packet)))
 	return event, true
 }
 

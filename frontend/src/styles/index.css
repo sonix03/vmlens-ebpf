@@ -1117,6 +1117,25 @@ footer {
   border-radius: 7px;
 }
 
+.telemetry-metrics-table {
+  min-width: 1440px;
+}
+
+.metric-number {
+  color: hsl(var(--orbit-foreground));
+  font: 700 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.metric-warning {
+  color: hsl(var(--orbit-warning));
+}
+
+.metric-error {
+  color: hsl(var(--orbit-danger));
+}
+
 .rtt-value.rtt-slow {
   border-color: hsl(var(--orbit-warning) / .56);
   background: hsl(var(--orbit-warning) / .14);

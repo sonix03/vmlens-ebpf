@@ -5,5 +5,6 @@ type Event struct {
 	Direction   string
 	Bytes       int64
 	Connections uint32
+	Requests    uint32
 	Errors      uint32
 }

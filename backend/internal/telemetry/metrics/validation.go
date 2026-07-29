@@ -35,8 +35,11 @@ func ValidateFlowEvent(event *model.FlowEvent) error {
 	if err := ValidatePortRange(event.SrcPort, event.DstPort); err != nil {
 		return err
 	}
-	if event.BytesSent < 0 || event.BytesReceived < 0 || event.Packets < 0 || event.ConnectionCount < 0 || event.RequestCount < 0 || event.ErrorCount < 0 {
+	if event.BytesSent < 0 || event.BytesReceived < 0 || event.Packets < 0 || event.ConnectionCount < 0 || event.RequestCount < 0 || event.ErrorCount < 0 || event.Retransmissions < 0 {
 		return fmt.Errorf("flow counters cannot be negative")
+	}
+	if event.AvgRTTMs < 0 || event.AvgAppDelayMs < 0 {
+		return fmt.Errorf("flow latency metrics cannot be negative")
 	}
 	now := time.Now().UTC()
 	if event.FirstSeen.IsZero() {

@@ -19,8 +19,8 @@ import (
 	telemetry "github.com/vmlens/vmlens/agent/internal/exporter"
 	"github.com/vmlens/vmlens/agent/internal/features/classification"
 	tcpconnection "github.com/vmlens/vmlens/agent/internal/features/protocols/transport/tcp/connection"
-	flowbytes "github.com/vmlens/vmlens/agent/internal/features/traffic/bytes"
 	"github.com/vmlens/vmlens/agent/internal/features/traffic/direction"
+	"github.com/vmlens/vmlens/agent/internal/pipeline"
 )
 
 type rawFlowEvent struct {
@@ -231,8 +231,8 @@ func ignoredPortKeys(ports []int) []uint32 {
 	return keys
 }
 
-func (c *EBPFCollector) Run(ctx context.Context) (<-chan telemetry.FlowEvent, <-chan error) {
-	events := make(chan telemetry.FlowEvent, 1024)
+func (c *EBPFCollector) Run(ctx context.Context) (<-chan pipeline.FlowMetric, <-chan error) {
+	events := make(chan pipeline.FlowMetric, 1024)
 	errorsChannel := make(chan error, 8)
 	go func() {
 		defer close(events)
@@ -266,7 +266,7 @@ func decodeRawFlowEvent(sample []byte) (rawFlowEvent, error) {
 	return raw, binary.Read(bytes.NewReader(sample), binary.LittleEndian, &raw)
 }
 
-func (c *EBPFCollector) convert(raw rawFlowEvent) telemetry.FlowEvent {
+func (c *EBPFCollector) convert(raw rawFlowEvent) pipeline.FlowMetric {
 	sourceIP, destinationIP := socketIP(raw.SrcAddr, raw.Family), socketIP(raw.DstAddr, raw.Family)
 	if parsed := net.ParseIP(sourceIP); parsed == nil || parsed.IsUnspecified() {
 		if fallback := c.fallbackSource(raw.Family); fallback != "" {
@@ -283,14 +283,14 @@ func (c *EBPFCollector) convert(raw rawFlowEvent) telemetry.FlowEvent {
 	flowDirection := direction.FromKernel(raw.Direction)
 	srcPort, dstPort := classification.NormalizePorts(protocol, int(raw.SrcPort), int(raw.DstPort))
 	now := time.Now().UTC()
-	event := telemetry.FlowEvent{
+	event := pipeline.FlowMetric{
 		AgentID: c.registration.AgentID, SrcIP: sourceIP, DstIP: destinationIP,
 		SrcPort: srcPort, DstPort: dstPort, Protocol: protocol,
-		Direction: flowDirection, ConnectionCount: int64(raw.Connections),
+		Direction: flowDirection, Source: "tc_ebpf",
+		ByteCount: int64(raw.Bytes), PacketCount: int64(raw.Packets), ConnectionCount: int64(raw.Connections),
 		RequestCount: tcpconnection.InferRequestCount(protocol, flowDirection, int64(raw.Bytes), raw.Connections, raw.ErrorCount),
-		ErrorCount:   int64(raw.ErrorCount), Packets: int64(raw.Packets), FirstSeen: now, LastSeen: now,
+		ErrorCount:   int64(raw.ErrorCount), FirstSeen: now, LastSeen: now,
 	}
-	flowbytes.ApplyDirectionalBytes(&event, int64(raw.Bytes))
 	if c.ifaceName != "" {
 		event.Interface = c.ifaceName
 	} else if len(c.registration.Interfaces) > 0 {

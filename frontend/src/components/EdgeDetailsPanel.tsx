@@ -165,6 +165,7 @@ export function EdgeDetailsPanel({ connection, onClose }: { connection: Connecti
           <MetaRow label="Traffic" value={formatBytes(connection.total_bytes)} />
           <MetaRow label="Requests" value={connection.request_count.toLocaleString()} />
           <MetaRow label="Errors" value={connection.error_count.toLocaleString()} />
+          <MetaRow label="Retransmissions" value={(connection.retransmission_count ?? 0).toLocaleString()} />
           <MetaRow label="Packets" value={connection.packets.toLocaleString()} />
           <MetaRow label="Connections" value={connection.connection_count.toLocaleString()} />
           <MetaRow label="Avg RTT" value={connection.avg_rtt_ms > 0 ? `${connection.avg_rtt_ms.toFixed(2)} ms` : '—'} />

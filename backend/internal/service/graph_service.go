@@ -53,6 +53,9 @@ type graphFlowRow struct {
 	Connections   int64
 	Requests      int64
 	Errors        int64
+	Retransmits   int64
+	AvgRTTMs      float64
+	AvgAppDelayMs float64
 	FirstSeen     time.Time
 	LastSeen      time.Time
 	ObservedAt    time.Time
@@ -106,6 +109,7 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 		SELECT COALESCE(f.agent_id, ''), COALESCE(f.src_vm_id, ''), COALESCE(f.dst_vm_id, ''),
 		       host(f.src_ip), host(f.dst_ip), COALESCE(f.src_port, 0), COALESCE(f.dst_port, 0), f.protocol, f.direction, f.scope,
 		       f.bytes_sent, f.bytes_received, f.packets, f.connection_count, f.request_count, f.error_count,
+		       f.retransmission_count, f.avg_rtt_ms, f.avg_app_delay_ms,
 		       f.first_seen, f.last_seen, f.observed_at, f.last_error_at,
 		       COALESCE(sv.name, ''), COALESCE(sv.tenant_id, ''), COALESCE(host(sv.private_ip), ''),
 		       COALESCE(sv.status, ''), COALESCE(sv.role, ''), COALESCE(sv.agent_id, ''),
@@ -161,7 +165,8 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 		if err := rows.Scan(
 			&row.AgentID, &row.SrcVMID, &row.DstVMID, &row.SrcIP, &row.DstIP, &row.SrcPort,
 			&row.DstPort, &row.Protocol, &row.Direction, &row.Scope, &row.BytesSent, &row.BytesReceived,
-			&row.Packets, &row.Connections, &row.Requests, &row.Errors, &row.FirstSeen, &row.LastSeen, &row.ObservedAt, &row.LastErrorAt,
+			&row.Packets, &row.Connections, &row.Requests, &row.Errors, &row.Retransmits, &row.AvgRTTMs, &row.AvgAppDelayMs,
+			&row.FirstSeen, &row.LastSeen, &row.ObservedAt, &row.LastErrorAt,
 			&row.SrcName, &row.SrcTenant, &row.SrcPrivateIP, &row.SrcStatus, &row.SrcRole, &row.SrcAgentID,
 			&row.DstName, &row.DstTenant, &row.DstPrivateIP, &row.DstStatus, &row.DstRole, &row.DstAgentID,
 		); err != nil {
@@ -279,6 +284,9 @@ func (s *GraphService) Get(ctx context.Context, filter model.GraphFilter) (model
 		edge.ConnectionCount += row.Connections
 		edge.RequestCount += row.Requests
 		edge.ErrorCount += row.Errors
+		edge.Retransmissions += row.Retransmits
+		edge.AvgRTTMs = mergeAverageMetric(edge.AvgRTTMs, row.AvgRTTMs)
+		edge.AvgAppDelayMs = mergeAverageMetric(edge.AvgAppDelayMs, row.AvgAppDelayMs)
 		if row.LastErrorAt.Valid && (edge.LastErrorAt == nil || row.LastErrorAt.Time.After(*edge.LastErrorAt)) {
 			value := row.LastErrorAt.Time
 			edge.LastErrorAt = &value
@@ -546,4 +554,14 @@ func edgeWeight(bytes int64) int {
 	default:
 		return 1
 	}
+}
+
+func mergeAverageMetric(current, next float64) float64 {
+	if next <= 0 {
+		return current
+	}
+	if current <= 0 {
+		return next
+	}
+	return (current + next) / 2
 }
