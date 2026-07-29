@@ -72,17 +72,29 @@ VMLENS_KEY_STATE_DIR
 agent/
   cmd/agent/              process entrypoint
   ebpf/
-    programs/             kernel-side eBPF C programs
+    cmd/flow_tracker/     kernel-side eBPF entrypoint
+    features/             kernel-side packet/traffic/protocol helpers
+    shared/bpf/           kernel-side shared flow structs/maps
     include/              fallback headers used by release builds
-    README.md             eBPF build notes
   internal/
-    capture/              mock, kprobe and TCX capture collectors
+    exporter/             backend payloads and HTTP sender
+    features/             userspace traffic/protocol/classification modules
+    flow/                 flow key, state, accumulator and debug formatter
+    pipeline/             event dispatcher scaffolding
     config/               env-based agent config
     identity/             VM hostname, machine-id, interface discovery
     lifecycle/            heartbeat / recovery loop
-    telemetry/            JSON payload types sent to backend
-    transport/            HTTP sender to control-plane
+    probe/                connectivity probe server/client
 ```
+
+The target refactor structure and current-to-target migration map are documented
+in [Agent Refactor Structure](agent-refactor-structure.md).
+
+The request/debug path from Docker Compose to VM traffic and frontend rendering
+is documented in [Debug Request Flow](runbooks/debug-request-flow.md).
+
+Fresh source download and `FLOW_DEBUG=true|false` setup are documented in
+[From Scratch Source Download](runbooks/from-scratch-source-download.md).
 
 ## Backend layout
 

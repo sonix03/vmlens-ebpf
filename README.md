@@ -111,6 +111,7 @@ sudo env \
   BACKEND_URL=http://127.0.0.1:18080 \
   MOCK_MODE=false \
   FLOW_INTERVAL=1s \
+  FLOW_DEBUG=false \
   CAPTURE_MODE=tc \
   CAPTURE_INTERFACE=ens3 \
   CONNECTIVITY_PROBE_ENABLED=true \
@@ -120,6 +121,16 @@ sudo env \
   AGENT_BINARY_URL=https://github.com/sonix03/vmlens-ebpf/releases/latest/download/vmlens-agent-linux-amd64 \
   BPF_OBJECT_URL=https://github.com/sonix03/vmlens-ebpf/releases/latest/download/flow_tracker-linux-amd64.bpf.o \
   bash /tmp/vmlens-install-agent.sh
+```
+
+For source-based reinstall from zero, use
+`docs/runbooks/from-scratch-source-download.md`. To toggle flow debug after
+install:
+
+```bash
+bash scripts/vmlens-agent.sh debug-on
+sudo journalctl -u vmlens-agent -f | grep flow_debug
+bash scripts/vmlens-agent.sh debug-off
 ```
 
 Check on the VM:
