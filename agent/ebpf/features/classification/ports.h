@@ -1,8 +1,8 @@
 #ifndef METRICS_PORTS_H
 #define METRICS_PORTS_H
 
-#include "../common/flow_defs.h"
-#include "../common/flow_event.h"
+#include "../../shared/bpf/flow_defs.h"
+#include "../../shared/bpf/flow_event.h"
 
 static __always_inline void set_ports(struct flow_event *event, __u16 src_port, __u16 dst_port)
 {
