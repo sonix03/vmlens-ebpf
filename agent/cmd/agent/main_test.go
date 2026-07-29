@@ -4,7 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vmlens/vmlens/agent/internal/telemetry"
+	telemetry "github.com/vmlens/vmlens/agent/internal/exporter"
+	"github.com/vmlens/vmlens/agent/internal/flow"
 )
 
 func TestEndpointFilterIncludesConfiguredTunnelPeer(t *testing.T) {
@@ -59,7 +60,7 @@ func TestIgnoreFlowDropsControlPlane(t *testing.T) {
 }
 
 func TestFlowAccumulatorPreservesByteTotals(t *testing.T) {
-	accumulator := newFlowAccumulator()
+	accumulator := flow.NewAccumulator()
 	first := time.Date(2026, 7, 6, 10, 0, 0, 0, time.UTC)
 	last := first.Add(time.Second)
 
@@ -93,7 +94,7 @@ func TestFlowAccumulatorPreservesByteTotals(t *testing.T) {
 }
 
 func TestFlowAccumulatorKeepsDirectionsSeparate(t *testing.T) {
-	accumulator := newFlowAccumulator()
+	accumulator := flow.NewAccumulator()
 	base := telemetry.FlowEvent{
 		AgentID: "agent-a", SrcIP: "10.20.20.130", DstIP: "140.82.121.4",
 		DstPort: 443, Protocol: "tcp",

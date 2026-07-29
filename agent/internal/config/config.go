@@ -32,6 +32,7 @@ type Config struct {
 	IgnorePorts                 []int
 	AllowCIDRs                  []string
 	DenyCIDRs                   []string
+	FlowDebug                   bool
 	Environment                 string
 	AgentVersion                string
 }
@@ -65,6 +66,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("parse CONNECTIVITY_PROBE_TIMEOUT: %w", err)
 	}
+	flowDebug, err := strconv.ParseBool(env("FLOW_DEBUG", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("parse FLOW_DEBUG: %w", err)
+	}
 	return Config{
 		BackendURL: env("BACKEND_URL", "http://localhost:8080"), MockMode: mockMode,
 		HeartbeatInterval: heartbeat, FlowInterval: flowInterval, HTTPTimeout: httpTimeout,
@@ -80,9 +85,10 @@ func Load() (Config, error) {
 		TenantID: os.Getenv("TENANT_ID"), PrivateIPs: csv(os.Getenv("AGENT_PRIVATE_IPS")),
 		PublicIP: os.Getenv("AGENT_PUBLIC_IP"), MACAddresses: csv(os.Getenv("AGENT_MAC_ADDRESSES")),
 		IgnoreIPs:   csv(os.Getenv("IGNORE_IPS")),
-		IgnorePorts: intCSV(env("IGNORE_PORTS", "18080,18081,30033,30035")),
+		IgnorePorts: intCSV(env("IGNORE_PORTS", "18080,18081,18082,30033,30035")),
 		AllowCIDRs:  csv(os.Getenv("FLOW_ALLOW_CIDRS")),
 		DenyCIDRs:   csv(os.Getenv("FLOW_DENY_CIDRS")),
+		FlowDebug:   flowDebug,
 		Environment: env("AGENT_ENVIRONMENT", "local"), AgentVersion: env("AGENT_VERSION", "0.1.0"),
 	}, nil
 }

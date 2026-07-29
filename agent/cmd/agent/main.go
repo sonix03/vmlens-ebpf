@@ -12,13 +12,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vmlens/vmlens/agent/internal/capture"
 	"github.com/vmlens/vmlens/agent/internal/config"
+	"github.com/vmlens/vmlens/agent/internal/exporter"
+	"github.com/vmlens/vmlens/agent/internal/features/protocols/network/icmp"
+	"github.com/vmlens/vmlens/agent/internal/features/traffic/packet"
+	"github.com/vmlens/vmlens/agent/internal/flow"
 	"github.com/vmlens/vmlens/agent/internal/identity"
 	"github.com/vmlens/vmlens/agent/internal/lifecycle"
 	"github.com/vmlens/vmlens/agent/internal/probe"
-	"github.com/vmlens/vmlens/agent/internal/telemetry"
-	"github.com/vmlens/vmlens/agent/internal/transport"
 )
 
 func main() {
@@ -38,7 +39,7 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	client := transport.New(cfg.BackendURL, cfg.HTTPTimeout)
+	client := exporter.New(cfg.BackendURL, cfg.HTTPTimeout)
 	controlPlane := newEndpointFilter(cfg.BackendURL, cfg.IgnoreIPs)
 	flowFilter, err := newFlowFilter(cfg.AllowCIDRs, cfg.DenyCIDRs)
 	if err != nil {
@@ -53,14 +54,15 @@ func run() error {
 	go lifecycle.Run(ctx, registration, cfg.HeartbeatInterval, client)
 	probe.Run(ctx, cfg, client, result.AgentID)
 
-	var source capture.Collector
+	var source packet.Collector
 	if cfg.MockMode {
-		source = capture.NewMock(registration, cfg.FlowInterval)
+		source = packet.NewMock(registration, cfg.FlowInterval)
 	} else {
-		ebpfSource, err := capture.NewEBPF(registration, capture.EBPFOptions{
+		ebpfSource, err := packet.NewEBPF(registration, packet.EBPFOptions{
 			ObjectPath:       cfg.BPFObject,
 			CaptureMode:      cfg.CaptureMode,
 			CaptureInterface: cfg.CaptureInterface,
+			IgnorePorts:      cfg.IgnorePorts,
 		})
 		if err != nil {
 			return fmt.Errorf("start real eBPF collector: %w", err)
@@ -68,11 +70,11 @@ func run() error {
 		source = ebpfSource
 		log.Printf("eBPF collector loaded object=%s mode=%s interface=%s", cfg.BPFObject, ebpfSource.Mode(), cfg.CaptureInterface)
 		if ebpfSource.Mode() != "tc" {
-			icmpSource, err := capture.NewICMP(registration, cfg.CaptureInterface)
+			icmpSource, err := icmp.NewCollector(registration, cfg.CaptureInterface)
 			if err != nil {
 				log.Printf("icmp reachability collector disabled: %v", err)
 			} else {
-				source = capture.NewMulti(ebpfSource, icmpSource)
+				source = packet.NewMulti(ebpfSource, icmpSource)
 				log.Printf("icmp reachability collector loaded interface=%s", cfg.CaptureInterface)
 			}
 		}
@@ -81,9 +83,9 @@ func run() error {
 	events, collectorErrors := source.Run(ctx)
 	flowTicker := time.NewTicker(cfg.FlowInterval)
 	defer flowTicker.Stop()
-	pendingFlows := newFlowAccumulator()
-	flowBatches := make(chan []telemetry.FlowEvent, 32)
-	go runFlowSender(ctx, client, flowBatches)
+	pendingFlows := flow.NewAccumulator()
+	flowBatches := make(chan []exporter.FlowEvent, 32)
+	go runFlowSender(ctx, client, flowBatches, cfg.FlowDebug)
 	for events != nil || collectorErrors != nil {
 		select {
 		case <-ctx.Done():
@@ -102,11 +104,17 @@ func run() error {
 			if !flowFilter.allows(event) {
 				continue
 			}
+			if cfg.FlowDebug {
+				log.Print(flow.DescribeEvent("captured", event))
+			}
 			pendingFlows.Add(event)
 		case <-flowTicker.C:
 			batch := pendingFlows.Drain()
 			if len(batch) == 0 {
 				continue
+			}
+			if cfg.FlowDebug {
+				log.Print(flow.DescribeBatch("drain", batch))
 			}
 			select {
 			case flowBatches <- batch:
@@ -129,69 +137,7 @@ func run() error {
 	return nil
 }
 
-type flowKey struct {
-	agentID   string
-	srcIP     string
-	dstIP     string
-	dstPort   int
-	protocol  string
-	direction string
-	iface     string
-}
-
-type flowAccumulator struct {
-	flows map[flowKey]telemetry.FlowEvent
-}
-
-func newFlowAccumulator() *flowAccumulator {
-	return &flowAccumulator{flows: make(map[flowKey]telemetry.FlowEvent)}
-}
-
-func (a *flowAccumulator) Add(event telemetry.FlowEvent) {
-	key := flowKey{
-		agentID: event.AgentID, srcIP: event.SrcIP, dstIP: event.DstIP,
-		dstPort: event.DstPort, protocol: event.Protocol, direction: event.Direction,
-		iface: event.Interface,
-	}
-	current, exists := a.flows[key]
-	if !exists {
-		a.flows[key] = event
-		return
-	}
-	current.BytesSent += event.BytesSent
-	current.BytesReceived += event.BytesReceived
-	current.Packets += event.Packets
-	current.ConnectionCount += event.ConnectionCount
-	current.RequestCount += event.RequestCount
-	current.ErrorCount += event.ErrorCount
-	if current.FirstSeen.IsZero() || (!event.FirstSeen.IsZero() && event.FirstSeen.Before(current.FirstSeen)) {
-		current.FirstSeen = event.FirstSeen
-	}
-	if event.LastSeen.After(current.LastSeen) {
-		current.LastSeen = event.LastSeen
-	}
-	a.flows[key] = current
-}
-
-func (a *flowAccumulator) AddAll(events []telemetry.FlowEvent) {
-	for _, event := range events {
-		a.Add(event)
-	}
-}
-
-func (a *flowAccumulator) Drain() []telemetry.FlowEvent {
-	if len(a.flows) == 0 {
-		return nil
-	}
-	events := make([]telemetry.FlowEvent, 0, len(a.flows))
-	for _, event := range a.flows {
-		events = append(events, event)
-	}
-	a.flows = make(map[flowKey]telemetry.FlowEvent)
-	return events
-}
-
-func runFlowSender(ctx context.Context, client *transport.Sender, batches <-chan []telemetry.FlowEvent) {
+func runFlowSender(ctx context.Context, client *exporter.Sender, batches <-chan []exporter.FlowEvent, debug bool) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -200,6 +146,8 @@ func runFlowSender(ctx context.Context, client *transport.Sender, batches <-chan
 			for _, event := range batch {
 				if err := sendFlow(ctx, client, event); err != nil {
 					log.Printf("send aggregated flow: %v", err)
+				} else if debug {
+					log.Print(flow.DescribeEvent("exported", event))
 				}
 			}
 		}
@@ -246,7 +194,7 @@ func (f endpointFilter) matches(ip string) bool {
 	return excluded
 }
 
-func ignoreFlow(controlPlane endpointFilter, event telemetry.FlowEvent, ignoredPorts []int) bool {
+func ignoreFlow(controlPlane endpointFilter, event exporter.FlowEvent, ignoredPorts []int) bool {
 	address := net.ParseIP(event.DstIP)
 	if address == nil || address.IsUnspecified() || address.IsLoopback() {
 		return true
@@ -289,7 +237,7 @@ func newFlowFilter(rawAllow, rawDeny []string) (flowFilter, error) {
 	return flowFilter{allow: allow, deny: deny}, nil
 }
 
-func (f flowFilter) allows(event telemetry.FlowEvent) bool {
+func (f flowFilter) allows(event exporter.FlowEvent) bool {
 	src, srcOK := parseAddr(event.SrcIP)
 	dst, dstOK := parseAddr(event.DstIP)
 	if !srcOK && !dstOK {
@@ -324,7 +272,7 @@ func parseAddr(value string) (netip.Addr, bool) {
 	return addr, true
 }
 
-func registerUntilReady(ctx context.Context, client *transport.Sender, registration telemetry.Registration) (telemetry.RegistrationResult, error) {
+func registerUntilReady(ctx context.Context, client *exporter.Sender, registration exporter.Registration) (exporter.RegistrationResult, error) {
 	delay := time.Second
 	for {
 		result, err := client.Register(ctx, registration)
@@ -334,7 +282,7 @@ func registerUntilReady(ctx context.Context, client *transport.Sender, registrat
 		log.Printf("register: %v; retrying in %s", err, delay)
 		select {
 		case <-ctx.Done():
-			return telemetry.RegistrationResult{}, ctx.Err()
+			return exporter.RegistrationResult{}, ctx.Err()
 		case <-time.After(delay):
 		}
 		if delay < 30*time.Second {
@@ -346,7 +294,7 @@ func registerUntilReady(ctx context.Context, client *transport.Sender, registrat
 	}
 }
 
-func sendFlow(ctx context.Context, client *transport.Sender, event telemetry.FlowEvent) error {
+func sendFlow(ctx context.Context, client *exporter.Sender, event exporter.FlowEvent) error {
 	var last error
 	for attempt := 0; attempt < 3; attempt++ {
 		if err := client.Flow(ctx, event); err == nil {
