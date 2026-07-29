@@ -65,6 +65,7 @@ for arch in ${target_arches}; do
     cd "${repo_dir}/agent"
     CGO_ENABLED=0 GOOS=linux GOARCH="${goarch}" \
       go build -trimpath -ldflags="-s -w" \
+      -buildvcs=false \
       -o "${out_dir}/vmlens-agent-linux-${arch}" ./cmd/agent
   )
 
