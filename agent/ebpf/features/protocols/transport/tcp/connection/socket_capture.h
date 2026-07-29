@@ -1,11 +1,12 @@
 #ifndef SOCKET_CAPTURE_H
 #define SOCKET_CAPTURE_H
 
-#include "../common/flow_defs.h"
-#include "../common/flow_event.h"
-#include "../metrics/bytes.h"
-#include "../metrics/ports.h"
-#include "../metrics/request_response.h"
+#include "../../../../../shared/bpf/flow_defs.h"
+#include "../../../../../shared/bpf/flow_event.h"
+#include "../../../../../shared/bpf/flow_maps.h"
+#include "../../../../traffic/bytes/bytes.h"
+#include "../../../../classification/ports.h"
+#include "request_response.h"
 
 static __always_inline void socket_metadata(struct flow_event *event, struct sock *sk,
                                              __u8 protocol, __u8 direction)

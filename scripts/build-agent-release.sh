@@ -71,7 +71,7 @@ for arch in ${target_arches}; do
   echo "building flow_tracker eBPF object for ${arch}"
   "${clang_bin}" -O2 -g -target bpf -D"__TARGET_ARCH_${bpf_arch}" \
     -I "${tmp_dir}" \
-    -c "${repo_dir}/agent/ebpf/programs/flow_tracker.bpf.c" \
+    -c "${repo_dir}/agent/ebpf/cmd/flow_tracker/flow_tracker.bpf.c" \
     -o "${out_dir}/flow_tracker-linux-${arch}.bpf.o"
 done
 

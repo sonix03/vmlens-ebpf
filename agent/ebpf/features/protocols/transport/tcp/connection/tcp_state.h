@@ -1,7 +1,7 @@
 #ifndef METRICS_TCP_STATE_H
 #define METRICS_TCP_STATE_H
 
-#include "../common/flow_defs.h"
+#include "../../../../../shared/bpf/flow_defs.h"
 
 #define TCP_FLAG_FIN 0x01
 #define TCP_FLAG_SYN 0x02

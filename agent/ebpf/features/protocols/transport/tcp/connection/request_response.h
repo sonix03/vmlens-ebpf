@@ -1,7 +1,7 @@
 #ifndef METRICS_REQUEST_RESPONSE_H
 #define METRICS_REQUEST_RESPONSE_H
 
-#include "../common/flow_event.h"
+#include "../../../../../shared/bpf/flow_event.h"
 #include "tcp_state.h"
 
 static __always_inline void mark_connection(struct flow_event *event)
