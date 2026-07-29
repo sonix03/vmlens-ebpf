@@ -1,10 +1,10 @@
-package capture
+package packet
 
 import (
 	"context"
 	"sync"
 
-	"github.com/vmlens/vmlens/agent/internal/telemetry"
+	telemetry "github.com/vmlens/vmlens/agent/internal/exporter"
 )
 
 type MultiCollector struct {

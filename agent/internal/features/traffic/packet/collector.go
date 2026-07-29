@@ -1,9 +1,9 @@
-package capture
+package packet
 
 import (
 	"context"
 
-	"github.com/vmlens/vmlens/agent/internal/telemetry"
+	telemetry "github.com/vmlens/vmlens/agent/internal/exporter"
 )
 
 type Collector interface {

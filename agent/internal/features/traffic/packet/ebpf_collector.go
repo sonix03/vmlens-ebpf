@@ -1,4 +1,4 @@
-package capture
+package packet
 
 import (
 	"bytes"
@@ -16,8 +16,11 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 
-	"github.com/vmlens/vmlens/agent/internal/metrics"
-	"github.com/vmlens/vmlens/agent/internal/telemetry"
+	telemetry "github.com/vmlens/vmlens/agent/internal/exporter"
+	"github.com/vmlens/vmlens/agent/internal/features/classification"
+	tcpconnection "github.com/vmlens/vmlens/agent/internal/features/protocols/transport/tcp/connection"
+	flowbytes "github.com/vmlens/vmlens/agent/internal/features/traffic/bytes"
+	"github.com/vmlens/vmlens/agent/internal/features/traffic/direction"
 )
 
 type rawFlowEvent struct {
@@ -39,6 +42,7 @@ type EBPFOptions struct {
 	ObjectPath       string
 	CaptureMode      string
 	CaptureInterface string
+	IgnorePorts      []int
 }
 
 type EBPFCollector struct {
@@ -77,6 +81,9 @@ func NewEBPF(registration telemetry.Registration, options EBPFOptions) (*EBPFCol
 		collection:   collection,
 	}
 	fail := func(err error) (*EBPFCollector, error) { _ = c.Close(); return nil, err }
+	if err := configureIgnoredPorts(collection.Maps["ignored_ports"], options.IgnorePorts); err != nil {
+		return fail(err)
+	}
 
 	if mode == "tc" || mode == "auto" {
 		if err := c.attachTCX(); err == nil {
@@ -194,6 +201,36 @@ func (c *EBPFCollector) attachTCX() error {
 	return nil
 }
 
+func configureIgnoredPorts(portsMap *cebpf.Map, ports []int) error {
+	if portsMap == nil {
+		return nil
+	}
+	for _, port := range ignoredPortKeys(ports) {
+		enabled := uint8(1)
+		if err := portsMap.Put(port, enabled); err != nil {
+			return fmt.Errorf("configure ignored port %d: %w", port, err)
+		}
+	}
+	return nil
+}
+
+func ignoredPortKeys(ports []int) []uint32 {
+	seen := map[uint32]struct{}{}
+	keys := make([]uint32, 0, len(ports))
+	for _, port := range ports {
+		if port <= 0 || port > 65535 {
+			continue
+		}
+		key := uint32(port)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	return keys
+}
+
 func (c *EBPFCollector) Run(ctx context.Context) (<-chan telemetry.FlowEvent, <-chan error) {
 	events := make(chan telemetry.FlowEvent, 1024)
 	errorsChannel := make(chan error, 8)
@@ -236,27 +273,24 @@ func (c *EBPFCollector) convert(raw rawFlowEvent) telemetry.FlowEvent {
 			sourceIP = fallback
 		}
 	}
-	protocol := "tcp"
+	protocol := classification.ProtocolTCP
 	switch raw.Protocol {
 	case 1, 58:
-		protocol = metrics.ProtocolICMP
+		protocol = classification.ProtocolICMP
 	case 17:
-		protocol = metrics.ProtocolUDP
+		protocol = classification.ProtocolUDP
 	}
-	direction := metrics.DirectionEgress
-	if raw.Direction == 1 {
-		direction = metrics.DirectionIngress
-	}
-	srcPort, dstPort := metrics.NormalizePorts(protocol, int(raw.SrcPort), int(raw.DstPort))
+	flowDirection := direction.FromKernel(raw.Direction)
+	srcPort, dstPort := classification.NormalizePorts(protocol, int(raw.SrcPort), int(raw.DstPort))
 	now := time.Now().UTC()
 	event := telemetry.FlowEvent{
 		AgentID: c.registration.AgentID, SrcIP: sourceIP, DstIP: destinationIP,
 		SrcPort: srcPort, DstPort: dstPort, Protocol: protocol,
-		Direction: direction, ConnectionCount: int64(raw.Connections),
-		RequestCount: metrics.InferRequestCount(protocol, direction, int64(raw.Bytes), raw.Connections, raw.ErrorCount),
+		Direction: flowDirection, ConnectionCount: int64(raw.Connections),
+		RequestCount: tcpconnection.InferRequestCount(protocol, flowDirection, int64(raw.Bytes), raw.Connections, raw.ErrorCount),
 		ErrorCount:   int64(raw.ErrorCount), Packets: int64(raw.Packets), FirstSeen: now, LastSeen: now,
 	}
-	metrics.ApplyDirectionalBytes(&event, int64(raw.Bytes))
+	flowbytes.ApplyDirectionalBytes(&event, int64(raw.Bytes))
 	if c.ifaceName != "" {
 		event.Interface = c.ifaceName
 	} else if len(c.registration.Interfaces) > 0 {

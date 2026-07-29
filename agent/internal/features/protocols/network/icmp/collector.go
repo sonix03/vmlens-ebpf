@@ -1,6 +1,6 @@
 //go:build linux
 
-package capture
+package icmp
 
 import (
 	"context"
@@ -12,8 +12,10 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/vmlens/vmlens/agent/internal/metrics"
-	"github.com/vmlens/vmlens/agent/internal/telemetry"
+	telemetry "github.com/vmlens/vmlens/agent/internal/exporter"
+	"github.com/vmlens/vmlens/agent/internal/features/classification"
+	flowbytes "github.com/vmlens/vmlens/agent/internal/features/traffic/bytes"
+	"github.com/vmlens/vmlens/agent/internal/features/traffic/direction"
 )
 
 const (
@@ -25,14 +27,14 @@ const (
 	packetOutgoing    = 4
 )
 
-type ICMPCollector struct {
+type Collector struct {
 	registration telemetry.Registration
 	ifaceName    string
 	fd           int
 	closeOnce    sync.Once
 }
 
-func NewICMP(registration telemetry.Registration, ifaceName string) (*ICMPCollector, error) {
+func NewCollector(registration telemetry.Registration, ifaceName string) (*Collector, error) {
 	ifaceName = firstNonEmpty(ifaceName, firstInterfaceName(registration))
 	if ifaceName == "" {
 		return nil, fmt.Errorf("icmp capture interface is empty")
@@ -52,10 +54,10 @@ func NewICMP(registration telemetry.Registration, ifaceName string) (*ICMPCollec
 		_ = unix.Close(fd)
 		return nil, fmt.Errorf("bind packet socket on %s: %w", ifaceName, err)
 	}
-	return &ICMPCollector{registration: registration, ifaceName: ifaceName, fd: fd}, nil
+	return &Collector{registration: registration, ifaceName: ifaceName, fd: fd}, nil
 }
 
-func (c *ICMPCollector) Run(ctx context.Context) (<-chan telemetry.FlowEvent, <-chan error) {
+func (c *Collector) Run(ctx context.Context) (<-chan telemetry.FlowEvent, <-chan error) {
 	events := make(chan telemetry.FlowEvent, 256)
 	errorsChannel := make(chan error, 4)
 	go func() {
@@ -91,7 +93,7 @@ func (c *ICMPCollector) Run(ctx context.Context) (<-chan telemetry.FlowEvent, <-
 	return events, errorsChannel
 }
 
-func (c *ICMPCollector) Close() error {
+func (c *Collector) Close() error {
 	var err error
 	c.closeOnce.Do(func() {
 		err = unix.Close(c.fd)
@@ -99,13 +101,13 @@ func (c *ICMPCollector) Close() error {
 	return err
 }
 
-func (c *ICMPCollector) parse(packet []byte, sockaddr unix.Sockaddr) (telemetry.FlowEvent, bool) {
+func (c *Collector) parse(packet []byte, sockaddr unix.Sockaddr) (telemetry.FlowEvent, bool) {
 	if len(packet) < ethernetHeaderLen {
 		return telemetry.FlowEvent{}, false
 	}
-	direction := metrics.DirectionIngress
+	flowDirection := direction.Ingress
 	if linkLayer, ok := sockaddr.(*unix.SockaddrLinklayer); ok && linkLayer.Pkttype == packetOutgoing {
-		direction = metrics.DirectionEgress
+		flowDirection = direction.Egress
 	}
 
 	ethProtocol := binary.BigEndian.Uint16(packet[12:14])
@@ -122,7 +124,7 @@ func (c *ICMPCollector) parse(packet []byte, sockaddr unix.Sockaddr) (telemetry.
 		return telemetry.FlowEvent{}, false
 	}
 
-	if direction == "ingress" {
+	if flowDirection == direction.Ingress {
 		sourceIP, destinationIP = destinationIP, sourceIP
 	}
 	now := time.Now().UTC()
@@ -130,15 +132,15 @@ func (c *ICMPCollector) parse(packet []byte, sockaddr unix.Sockaddr) (telemetry.
 		AgentID:      c.registration.AgentID,
 		SrcIP:        sourceIP,
 		DstIP:        destinationIP,
-		Protocol:     metrics.ProtocolICMP,
-		Direction:    direction,
+		Protocol:     classification.ProtocolICMP,
+		Direction:    flowDirection,
 		Packets:      1,
 		RequestCount: 1,
 		FirstSeen:    now,
 		LastSeen:     now,
 		Interface:    c.ifaceName,
 	}
-	metrics.ApplyDirectionalBytes(&event, int64(len(packet)))
+	flowbytes.ApplyDirectionalBytes(&event, int64(len(packet)))
 	return event, true
 }
 

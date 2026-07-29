@@ -1,6 +1,6 @@
 //go:build linux
 
-package capture
+package icmp
 
 import (
 	"encoding/binary"
@@ -9,16 +9,18 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/vmlens/vmlens/agent/internal/telemetry"
+	telemetry "github.com/vmlens/vmlens/agent/internal/exporter"
+	"github.com/vmlens/vmlens/agent/internal/features/classification"
+	"github.com/vmlens/vmlens/agent/internal/features/traffic/direction"
 )
 
 func TestICMPCollectorParsesEgressPing(t *testing.T) {
-	collector := ICMPCollector{registration: telemetry.Registration{AgentID: "agent-a"}, ifaceName: "ens3"}
+	collector := Collector{registration: telemetry.Registration{AgentID: "agent-a"}, ifaceName: "ens3"}
 	event, ok := collector.parse(ipv4ICMPPacket("10.20.20.130", "10.20.20.249"), &unix.SockaddrLinklayer{Pkttype: packetOutgoing})
 	if !ok {
 		t.Fatal("expected ICMP packet to parse")
 	}
-	if event.Protocol != "icmp" || event.Direction != "egress" {
+	if event.Protocol != classification.ProtocolICMP || event.Direction != direction.Egress {
 		t.Fatalf("unexpected protocol/direction: %s/%s", event.Protocol, event.Direction)
 	}
 	if event.SrcIP != "10.20.20.130" || event.DstIP != "10.20.20.249" {
@@ -30,12 +32,12 @@ func TestICMPCollectorParsesEgressPing(t *testing.T) {
 }
 
 func TestICMPCollectorParsesIngressFromLocalPerspective(t *testing.T) {
-	collector := ICMPCollector{registration: telemetry.Registration{AgentID: "agent-b"}, ifaceName: "ens3"}
+	collector := Collector{registration: telemetry.Registration{AgentID: "agent-b"}, ifaceName: "ens3"}
 	event, ok := collector.parse(ipv4ICMPPacket("10.20.20.130", "10.20.20.249"), &unix.SockaddrLinklayer{Pkttype: unix.PACKET_HOST})
 	if !ok {
 		t.Fatal("expected ICMP packet to parse")
 	}
-	if event.Protocol != "icmp" || event.Direction != "ingress" {
+	if event.Protocol != classification.ProtocolICMP || event.Direction != direction.Ingress {
 		t.Fatalf("unexpected protocol/direction: %s/%s", event.Protocol, event.Direction)
 	}
 	if event.SrcIP != "10.20.20.249" || event.DstIP != "10.20.20.130" {

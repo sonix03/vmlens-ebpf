@@ -1,4 +1,4 @@
-package capture
+package packet
 
 import (
 	"context"
@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vmlens/vmlens/agent/internal/telemetry"
+	telemetry "github.com/vmlens/vmlens/agent/internal/exporter"
+	"github.com/vmlens/vmlens/agent/internal/features/classification"
+	"github.com/vmlens/vmlens/agent/internal/features/traffic/direction"
 )
 
 type mockDestination struct {
@@ -64,7 +66,7 @@ func (c *MockCollector) event(now time.Time) telemetry.FlowEvent {
 	return telemetry.FlowEvent{
 		AgentID: c.registration.AgentID, SrcIP: sourceIP, DstIP: destination.ip,
 		SrcPort: 32000 + c.random.Intn(25000), DstPort: destination.port,
-		Protocol: destination.protocol, Direction: "egress", BytesSent: bytesSent,
+		Protocol: destination.protocol, Direction: direction.Egress, BytesSent: bytesSent,
 		BytesReceived: bytesReceived, Packets: (bytesSent+bytesReceived)/1200 + 1,
 		ConnectionCount: connections, RequestCount: connections, FirstSeen: now.Add(-time.Duration(100+c.random.Intn(900)) * time.Millisecond),
 		LastSeen: now, Interface: iface,
@@ -74,7 +76,7 @@ func (c *MockCollector) event(now time.Time) telemetry.FlowEvent {
 func (c *MockCollector) destinations() []mockDestination {
 	name := strings.ToLower(c.registration.Hostname)
 	if strings.Contains(name, "db") {
-		return []mockDestination{{"10.10.1.15", 8080, "tcp"}, {"1.1.1.1", 443, "tcp"}, {"10.10.1.40", 6379, "tcp"}}
+		return []mockDestination{{"10.10.1.15", 8080, classification.ProtocolTCP}, {"1.1.1.1", 443, classification.ProtocolTCP}, {"10.10.1.40", 6379, classification.ProtocolTCP}}
 	}
-	return []mockDestination{{"10.10.1.30", 5432, "tcp"}, {"8.8.8.8", 443, "tcp"}, {"10.10.1.99", 8080, "tcp"}, {"1.1.1.1", 53, "udp"}}
+	return []mockDestination{{"10.10.1.30", 5432, classification.ProtocolTCP}, {"8.8.8.8", 443, classification.ProtocolTCP}, {"10.10.1.99", 8080, classification.ProtocolTCP}, {"1.1.1.1", 53, classification.ProtocolUDP}}
 }
