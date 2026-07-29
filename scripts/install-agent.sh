@@ -23,6 +23,7 @@ CONNECTIVITY_PROBE_LISTEN_ADDR="${CONNECTIVITY_PROBE_LISTEN_ADDR:-0.0.0.0:18081}
 IGNORE_PORTS="${IGNORE_PORTS:-18080,18081,18082}"
 FLOW_ALLOW_CIDRS="${FLOW_ALLOW_CIDRS:-}"
 FLOW_DENY_CIDRS="${FLOW_DENY_CIDRS:-}"
+FLOW_DEBUG="${FLOW_DEBUG:-false}"
 AUTO_DENY_TUNNEL_PEER="${AUTO_DENY_TUNNEL_PEER:-true}"
 
 # auto: use prebuilt files when URLs/paths are provided, otherwise build locally.
@@ -38,6 +39,18 @@ if [[ -z "${BACKEND_URL}" ]]; then
   echo "BACKEND_URL is required" >&2
   exit 1
 fi
+
+normalize_bool() {
+  local name="$1"
+  local value="$2"
+  case "${value,,}" in
+    true|1|yes|on) printf 'true\n' ;;
+    false|0|no|off) printf 'false\n' ;;
+    *) echo "${name} must be true or false, got: ${value}" >&2; return 1 ;;
+  esac
+}
+
+FLOW_DEBUG="$(normalize_bool FLOW_DEBUG "${FLOW_DEBUG}")"
 
 export HOME="${HOME:-/root}"
 export GOPATH="${GOPATH:-/root/go}"
@@ -192,7 +205,7 @@ build_bpf_from_source() {
 
   cd "${repo_dir}/agent"
   clang -O2 -g -target bpf -D"__TARGET_ARCH_${bpf_arch}" \
-    -I "${build_dir}" -c ebpf/programs/flow_tracker.bpf.c -o "${build_dir}/flow_tracker.bpf.o"
+    -I "${build_dir}" -c ebpf/cmd/flow_tracker/flow_tracker.bpf.c -o "${build_dir}/flow_tracker.bpf.o"
   install -m0644 "${build_dir}/flow_tracker.bpf.o" /usr/lib/vmlens/flow_tracker.bpf.o
 }
 
@@ -265,6 +278,7 @@ IGNORE_IPS=${AGENT_IGNORE_IPS}
 IGNORE_PORTS=${IGNORE_PORTS}
 FLOW_ALLOW_CIDRS=${FLOW_ALLOW_CIDRS}
 FLOW_DENY_CIDRS=${FLOW_DENY_CIDRS}
+FLOW_DEBUG=${FLOW_DEBUG}
 AGENT_ENVIRONMENT=${AGENT_ENVIRONMENT}
 EOF
 chmod 0640 /etc/vmlens/agent.env

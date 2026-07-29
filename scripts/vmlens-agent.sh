@@ -2,8 +2,8 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 start|stop|restart|status|logs"
-  echo "Env: BACKEND_URL=http://127.0.0.1:18080 MOCK_MODE=false FLOW_INTERVAL=1s CAPTURE_MODE=tc CAPTURE_INTERFACE=ens3 CONNECTIVITY_PROBE_ENABLED=true INSTALL_MODE=auto|prebuilt|build"
+  echo "Usage: $0 start|stop|restart|status|logs|debug-on|debug-off|debug-status"
+  echo "Env: BACKEND_URL=http://127.0.0.1:18080 MOCK_MODE=false FLOW_DEBUG=false FLOW_INTERVAL=1s CAPTURE_MODE=tc CAPTURE_INTERFACE=ens3 CONNECTIVITY_PROBE_ENABLED=true INSTALL_MODE=auto|prebuilt|build"
 }
 
 action="${1:-}"
@@ -14,10 +14,11 @@ fi
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 service_name="vmlens-agent"
+agent_env_file="/etc/vmlens/agent.env"
 
 need_root() {
   if [[ ${EUID} -ne 0 ]]; then
-    exec sudo --preserve-env=BACKEND_URL,MOCK_MODE,TENANT_ID,AGENT_PRIVATE_IPS,AGENT_PUBLIC_IP,AGENT_IGNORE_IPS,AGENT_ENVIRONMENT,FLOW_INTERVAL,CAPTURE_MODE,CAPTURE_INTERFACE,CONNECTIVITY_PROBE_ENABLED,CONNECTIVITY_PROBE_INTERVAL,CONNECTIVITY_PROBE_TIMEOUT,CONNECTIVITY_PROBE_LISTEN_ADDR,IGNORE_PORTS,FLOW_ALLOW_CIDRS,FLOW_DENY_CIDRS,AUTO_DENY_TUNNEL_PEER,SSH_CLIENT,SSH_CONNECTION,INSTALL_MODE,AGENT_BINARY_URL,AGENT_BINARY_PATH,BPF_OBJECT_URL,BPF_OBJECT_PATH "$0" "$@"
+    exec sudo --preserve-env=BACKEND_URL,MOCK_MODE,TENANT_ID,AGENT_PRIVATE_IPS,AGENT_PUBLIC_IP,AGENT_IGNORE_IPS,AGENT_ENVIRONMENT,FLOW_INTERVAL,CAPTURE_MODE,CAPTURE_INTERFACE,CONNECTIVITY_PROBE_ENABLED,CONNECTIVITY_PROBE_INTERVAL,CONNECTIVITY_PROBE_TIMEOUT,CONNECTIVITY_PROBE_LISTEN_ADDR,IGNORE_PORTS,FLOW_ALLOW_CIDRS,FLOW_DENY_CIDRS,FLOW_DEBUG,AUTO_DENY_TUNNEL_PEER,SSH_CLIENT,SSH_CONNECTION,INSTALL_MODE,AGENT_BINARY_URL,AGENT_BINARY_PATH,BPF_OBJECT_URL,BPF_OBJECT_PATH "$0" "$@"
   fi
 }
 
@@ -33,10 +34,38 @@ start_agent() {
   export CONNECTIVITY_PROBE_TIMEOUT="${CONNECTIVITY_PROBE_TIMEOUT:-1s}"
   export CONNECTIVITY_PROBE_LISTEN_ADDR="${CONNECTIVITY_PROBE_LISTEN_ADDR:-0.0.0.0:18081}"
   export IGNORE_PORTS="${IGNORE_PORTS:-18080,18081,18082}"
+  export FLOW_DEBUG="${FLOW_DEBUG:-false}"
   export AUTO_DENY_TUNNEL_PEER="${AUTO_DENY_TUNNEL_PEER:-true}"
   "${repo_dir}/scripts/install-agent.sh"
   systemctl restart "${service_name}"
   systemctl --no-pager --lines=0 status "${service_name}"
+}
+
+set_flow_debug() {
+  local debug_action="$1"
+  local value="$2"
+  need_root "${debug_action}"
+  if [[ ! -f "${agent_env_file}" ]]; then
+    echo "${agent_env_file} not found; run '$0 start' first" >&2
+    exit 1
+  fi
+  if grep -q '^FLOW_DEBUG=' "${agent_env_file}"; then
+    sed -i "s/^FLOW_DEBUG=.*/FLOW_DEBUG=${value}/" "${agent_env_file}"
+  else
+    printf 'FLOW_DEBUG=%s\n' "${value}" >>"${agent_env_file}"
+  fi
+  systemctl restart "${service_name}"
+  echo "FLOW_DEBUG=${value}"
+}
+
+show_flow_debug() {
+  need_root debug-status
+  if [[ -f "${agent_env_file}" ]]; then
+    grep '^FLOW_DEBUG=' "${agent_env_file}" || echo "FLOW_DEBUG=false"
+  else
+    echo "${agent_env_file} not found"
+    exit 1
+  fi
 }
 
 case "${action}" in
@@ -57,5 +86,8 @@ case "${action}" in
   logs)
     journalctl -u "${service_name}" -f
     ;;
+  debug-on) set_flow_debug debug-on true ;;
+  debug-off) set_flow_debug debug-off false ;;
+  debug-status) show_flow_debug ;;
   *) usage >&2; exit 1 ;;
 esac
