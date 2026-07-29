@@ -3,7 +3,8 @@
 
 /*
  * Shared map declarations belong here once packet/rtt/retrans programs are
- * generated independently. Active runtime maps still live under agent/ebpf.
+ * generated independently. Active runtime maps live next to the feature
+ * program under agent/internal/shared/bpf/flow_maps.h.
  */
 
 #endif

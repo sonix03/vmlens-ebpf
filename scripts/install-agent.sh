@@ -205,7 +205,7 @@ build_bpf_from_source() {
 
   cd "${repo_dir}/agent"
   clang -O2 -g -target bpf -D"__TARGET_ARCH_${bpf_arch}" \
-    -I "${build_dir}" -c ebpf/cmd/flow_tracker/flow_tracker.bpf.c -o "${build_dir}/flow_tracker.bpf.o"
+    -I "${build_dir}" -c internal/features/traffic/packet/flow_tracker.bpf.c -o "${build_dir}/flow_tracker.bpf.o"
   install -m0644 "${build_dir}/flow_tracker.bpf.o" /usr/lib/vmlens/flow_tracker.bpf.o
 }
 

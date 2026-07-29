@@ -13,8 +13,12 @@ socket metadata ──────> network collector ─────┤
                                                └─> Prometheus exporter ─> Grafana
 ```
 
-The active VM-side eBPF program lives under `agent/ebpf/programs/`, with
-fallback headers under `agent/ebpf/include/`.
+The active VM-side eBPF entrypoint lives under
+`agent/internal/features/traffic/packet/flow_tracker.bpf.c`. Kernel feature
+sources and helpers are co-located with their domain under
+`agent/internal/features/`, shared BPF headers live under
+`agent/internal/shared/bpf/`, and fallback vmlinux headers stay under
+`agent/ebpf/include/`.
 
 CPU is computed from deltas in process scheduler ticks. RSS comes from `/proc/<pid>/stat`; cumulative storage bytes come from `/proc/<pid>/io`. TCP sockets are joined to process file descriptors by inode. This gives correct ownership metadata but no byte-accurate network accounting; RX/TX remain zero in fallback mode.
 

@@ -36,8 +36,14 @@ Dokumen ini mendefinisikan metric utama VMLens untuk telemetry core berbasis TC/
 
 | Layer | Folder | Responsibility |
 |---|---|---|
-| Kernel capture metrics | `agent/ebpf/programs/metrics/` | Small eBPF helpers for bytes, packets, ports, TCP state, request/error signal |
-| Agent normalization | `agent/internal/metrics/` | Convert raw capture event into VMLens telemetry counters |
+| Kernel packet capture | `agent/internal/features/traffic/packet/` | TC ingress/egress packet parsing and event emission |
+| Kernel traffic metrics | `agent/internal/features/traffic/bytes/` + `agent/internal/features/traffic/packets/` | Small eBPF helpers for bytes and packets |
+| Kernel protocol signals | `agent/internal/features/protocols/transport/tcp/` | TCP connection, request/error, RTT, retransmission helper locations |
+| Kernel classification | `agent/internal/features/classification/` | Port/protocol normalization helpers |
+| Agent traffic metrics | `agent/internal/features/traffic/` | Convert raw capture event into byte, packet, and direction counters |
+| Agent protocol metrics | `agent/internal/features/protocols/` | Keep TCP/UDP/ICMP/HTTP/DNS/TLS model and reducer logic separated by protocol |
+| Agent classification | `agent/internal/features/classification/` | Classify network, transport, and application protocol hints |
+| Agent flow aggregation | `agent/internal/flow/` | Merge per-event telemetry into exported flow batches and emit `FLOW_DEBUG` logs |
 | Backend normalization | `backend/internal/telemetry/metrics/` | Validate, infer request count, calculate rate/severity, normalize flow metrics |
 
 ## Production defaults
