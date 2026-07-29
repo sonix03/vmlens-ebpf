@@ -1,4 +1,4 @@
-package metrics
+package classification
 
 func NormalizePorts(protocol string, srcPort, dstPort int) (int, int) {
 	if protocol == ProtocolICMP {
