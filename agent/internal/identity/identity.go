@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/vmlens/vmlens/agent/internal/config"
-	"github.com/vmlens/vmlens/agent/internal/telemetry"
+	telemetry "github.com/vmlens/vmlens/agent/internal/exporter"
 )
 
 func Collect(cfg config.Config) (telemetry.Registration, error) {

@@ -8,8 +8,7 @@ import (
 	"time"
 
 	"github.com/vmlens/vmlens/agent/internal/config"
-	"github.com/vmlens/vmlens/agent/internal/telemetry"
-	"github.com/vmlens/vmlens/agent/internal/transport"
+	"github.com/vmlens/vmlens/agent/internal/exporter"
 )
 
 const (
@@ -18,7 +17,7 @@ const (
 	defaultProbeNetwork = "tcp"
 )
 
-func Run(ctx context.Context, cfg config.Config, client *transport.Sender, agentID string) {
+func Run(ctx context.Context, cfg config.Config, client *exporter.Sender, agentID string) {
 	if !cfg.ConnectivityProbeEnabled {
 		return
 	}
@@ -51,7 +50,7 @@ func serveTCP(ctx context.Context, address string) {
 	}
 }
 
-func runTargetLoop(ctx context.Context, cfg config.Config, client *transport.Sender, agentID string) {
+func runTargetLoop(ctx context.Context, cfg config.Config, client *exporter.Sender, agentID string) {
 	interval := cfg.ConnectivityProbeInterval
 	if interval <= 0 {
 		interval = 5 * time.Second
@@ -68,7 +67,7 @@ func runTargetLoop(ctx context.Context, cfg config.Config, client *transport.Sen
 	}
 }
 
-func probeTargets(ctx context.Context, cfg config.Config, client *transport.Sender, agentID string) {
+func probeTargets(ctx context.Context, cfg config.Config, client *exporter.Sender, agentID string) {
 	targets, err := client.ConnectionTargets(ctx, agentID)
 	if err != nil {
 		log.Printf("connectivity probe targets: %v", err)
@@ -85,7 +84,7 @@ func probeTargets(ctx context.Context, cfg config.Config, client *transport.Send
 	}
 }
 
-func probeTarget(ctx context.Context, cfg config.Config, agentID string, target telemetry.ConnectionProbeTarget) telemetry.ConnectionProbeEvent {
+func probeTarget(ctx context.Context, cfg config.Config, agentID string, target exporter.ConnectionProbeTarget) exporter.ConnectionProbeEvent {
 	protocol := target.Protocol
 	if protocol == "" {
 		protocol = defaultProbeNetwork
@@ -101,7 +100,7 @@ func probeTarget(ctx context.Context, cfg config.Config, agentID string, target 
 	now := time.Now().UTC()
 	start := time.Now()
 	success, errText := tcpConnect(ctx, target.DestIP, port, timeout)
-	return telemetry.ConnectionProbeEvent{
+	return exporter.ConnectionProbeEvent{
 		AgentID: agentID, SourceIP: target.SourceIP, DestIP: target.DestIP,
 		Protocol: protocol, DestPort: port, Success: success,
 		RTTMs: float64(time.Since(start).Microseconds()) / 1000,

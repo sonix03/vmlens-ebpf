@@ -5,11 +5,10 @@ import (
 	"log"
 	"time"
 
-	"github.com/vmlens/vmlens/agent/internal/telemetry"
-	"github.com/vmlens/vmlens/agent/internal/transport"
+	"github.com/vmlens/vmlens/agent/internal/exporter"
 )
 
-func Run(ctx context.Context, registration telemetry.Registration, interval time.Duration, client *transport.Sender) {
+func Run(ctx context.Context, registration exporter.Registration, interval time.Duration, client *exporter.Sender) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -17,7 +16,7 @@ func Run(ctx context.Context, registration telemetry.Registration, interval time
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
-			heartbeat := telemetry.Heartbeat{AgentID: registration.AgentID, Status: "online", Timestamp: now.UTC().Format(time.RFC3339Nano)}
+			heartbeat := exporter.Heartbeat{AgentID: registration.AgentID, Status: "online", Timestamp: now.UTC().Format(time.RFC3339Nano)}
 			if err := client.Heartbeat(ctx, heartbeat); err != nil {
 				log.Printf("heartbeat: %v", err)
 				// Registration is idempotent. Retrying it here lets a live VM recover

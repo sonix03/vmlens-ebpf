@@ -7,8 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vmlens/vmlens/agent/internal/telemetry"
-	"github.com/vmlens/vmlens/agent/internal/transport"
+	"github.com/vmlens/vmlens/agent/internal/exporter"
 )
 
 func TestRunRegistersAgainAfterHeartbeatFailure(t *testing.T) {
@@ -32,8 +31,8 @@ func TestRunRegistersAgainAfterHeartbeatFailure(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registration := telemetry.Registration{AgentID: "agent-test", Hostname: "vm-test", AgentVersion: "test"}
-	go Run(ctx, registration, time.Millisecond, transport.New(server.URL, time.Second))
+	registration := exporter.Registration{AgentID: "agent-test", Hostname: "vm-test", AgentVersion: "test"}
+	go Run(ctx, registration, time.Millisecond, exporter.New(server.URL, time.Second))
 
 	select {
 	case <-recovered:

@@ -1,4 +1,4 @@
-package telemetry
+package exporter
 
 type Interface struct {
 	Name       string `json:"name"`
