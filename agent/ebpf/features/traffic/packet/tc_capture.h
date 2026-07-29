@@ -1,13 +1,14 @@
 #ifndef TC_CAPTURE_H
 #define TC_CAPTURE_H
 
-#include "../common/flow_defs.h"
-#include "../common/flow_event.h"
-#include "../metrics/bytes.h"
-#include "../metrics/capture_stats.h"
-#include "../metrics/packets.h"
-#include "../metrics/ports.h"
-#include "../metrics/request_response.h"
+#include "../../../shared/bpf/flow_defs.h"
+#include "../../../shared/bpf/flow_event.h"
+#include "../../../shared/bpf/flow_maps.h"
+#include "../../classification/ports.h"
+#include "../../protocols/transport/tcp/connection/request_response.h"
+#include "../bytes/bytes.h"
+#include "../packets/packets.h"
+#include "filter/port_filter.h"
 #include "network_parser.h"
 #include "transport_parser.h"
 
@@ -56,6 +57,10 @@ static __always_inline int emit_tc_packet(struct __sk_buff *skb, __u8 direction)
         return TC_ACT_OK;
     }
     if (!parse_transport_metadata(data, data_end, network.l4_offset, network.protocol, &transport)) {
+        return TC_ACT_OK;
+    }
+    if (ignored_transport_ports(network.protocol, transport.src_port, transport.dst_port)) {
+        count_capture_stat(CAPTURE_STAT_PORT_IGNORED);
         return TC_ACT_OK;
     }
 

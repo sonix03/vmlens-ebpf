@@ -1,8 +1,8 @@
 #ifndef TRANSPORT_PARSER_H
 #define TRANSPORT_PARSER_H
 
-#include "../common/flow_defs.h"
-#include "../metrics/capture_stats.h"
+#include "../../../shared/bpf/flow_defs.h"
+#include "../../../shared/bpf/flow_maps.h"
 #include "packet_reader.h"
 
 struct transport_metadata {
