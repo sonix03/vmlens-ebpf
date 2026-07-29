@@ -16,16 +16,4 @@ struct flow_event {
     __u32 error_count;
 } __attribute__((packed));
 
-struct {
-    __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 1 << 24);
-} events SEC(".maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __uint(max_entries, 32768);
-    __type(key, __u64);
-    __type(value, struct flow_event);
-} pending_io SEC(".maps");
-
 #endif // FLOW_EVENT_H

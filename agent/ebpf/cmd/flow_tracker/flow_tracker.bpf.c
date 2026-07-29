@@ -8,10 +8,11 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 
-#include "common/flow_defs.h"
-#include "common/flow_event.h"
-#include "capture/socket_capture.h"
-#include "capture/tc_capture.h"
+#include "../../shared/bpf/flow_defs.h"
+#include "../../shared/bpf/flow_event.h"
+#include "../../shared/bpf/flow_maps.h"
+#include "../../features/protocols/transport/tcp/connection/socket_capture.h"
+#include "../../features/traffic/packet/tc_capture.h"
 
 SEC("kprobe/tcp_v4_connect")
 int BPF_KPROBE(trace_tcp_connect, struct sock *sk) { return emit_connection(sk, IPPROTO_TCP_VALUE, DIR_EGRESS); }

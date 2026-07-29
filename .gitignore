@@ -15,6 +15,7 @@ agent/ebpf/vmlinux.h
 agent/ebpf/*.o
 agent/ebpf/include/vmlinux.h
 agent/ebpf/programs/*.o
+agent/ebpf/programs/kernel/
 legacy/v1-stack/internal/ebpf/vmlinux.h
 legacy/v1-stack/internal/ebpf/*.o
 /SCRIPT.md

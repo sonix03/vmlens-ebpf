@@ -1,5 +1,7 @@
-#ifndef CAPTURE_STATS_H
-#define CAPTURE_STATS_H
+#ifndef FLOW_MAPS_H
+#define FLOW_MAPS_H
+
+#include "flow_event.h"
 
 enum capture_stat_key {
     CAPTURE_STAT_SEEN = 0,
@@ -13,8 +15,21 @@ enum capture_stat_key {
     CAPTURE_STAT_TRANSPORT_READ_FAIL = 8,
     CAPTURE_STAT_TCP_READ_FAIL = 9,
     CAPTURE_STAT_RINGBUF_FULL = 10,
-    CAPTURE_STAT_MAX = 11,
+    CAPTURE_STAT_PORT_IGNORED = 11,
+    CAPTURE_STAT_MAX = 12,
 };
+
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 1 << 24);
+} events SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 32768);
+    __type(key, __u64);
+    __type(value, struct flow_event);
+} pending_io SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -22,6 +37,13 @@ struct {
     __type(key, __u32);
     __type(value, __u64);
 } capture_stats SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 256);
+    __type(key, __u32);
+    __type(value, __u8);
+} ignored_ports SEC(".maps");
 
 static __always_inline void count_capture_stat(__u32 key)
 {
@@ -32,4 +54,4 @@ static __always_inline void count_capture_stat(__u32 key)
     }
 }
 
-#endif // CAPTURE_STATS_H
+#endif // FLOW_MAPS_H
