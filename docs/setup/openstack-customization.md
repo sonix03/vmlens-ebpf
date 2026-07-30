@@ -90,19 +90,21 @@ cd /mnt/c/Documents/Ionext/vmlens-ebpf
 docker compose up -d --build
 ```
 
-Create local operator config:
+Create local VM inventory:
 
 ```bash
-cp configs/local.env.example configs/local.env
+cp configs/vms.example configs/vms.local
 ```
 
 Edit:
 
 ```text
-configs/local.env
+configs/vms.local
 ```
 
-Put the VM list and SSH key mapping in `configs/local.env`.
+Put the VM list, SSH key override, and optional proxy jump in `configs/vms.local`.
+The first column is also the VM display name in the backend/frontend when the
+second column matches the VM private IP.
 
 List configured VMs:
 
@@ -143,7 +145,7 @@ bash scripts/vmlens-tunnel.sh start 10.20.20.130
 bash scripts/vmlens-tunnel.sh start 10.20.20.199
 ```
 
-Aliases from `VMLENS_VM_PROFILES` also work:
+Aliases from `configs/vms.local` also work:
 
 ```bash
 bash scripts/vmlens-tunnel.sh start testing-a-1
@@ -161,39 +163,36 @@ http://localhost:3000
 One shared SSH key for all VMs is normal if the same public key is installed on
 each VM.
 
-Example:
+Example with the minimal seven tunnel fields:
 
 ```text
-VMLENS_SSH_USER=ubuntu
-VMLENS_SSH_KEY=~/.ssh/id_ed25519_vmlens
-
-VMLENS_VM_PROFILES="testing_a_1 testing_a_2 testing_a_3"
-
-VMLENS_VM_TESTING_A_1_ALIAS=testing-a-1
-VMLENS_VM_TESTING_A_1_HOST=10.20.20.130
-VMLENS_VM_TESTING_A_1_SSH_USER=-
-VMLENS_VM_TESTING_A_1_SSH_KEY=-
-
-VMLENS_VM_TESTING_A_2_ALIAS=testing-a-2
-VMLENS_VM_TESTING_A_2_HOST=10.20.20.199
-VMLENS_VM_TESTING_A_2_SSH_USER=-
-VMLENS_VM_TESTING_A_2_SSH_KEY=-
+testing-a-1|10.20.20.130|-|-|-|-|ubuntu@10.20.20.199
+testing-a-2|10.20.20.199|-|-|-|-|-
 ```
 
-The `-` values mean: use defaults from `configs/local.env`.
+The full inventory format can also include backend/cloud metadata:
+
+```text
+alias|host|ssh_user|ssh_key|remote_backend|local_backend|proxy_jump|role|type|environment|owner|tenant_id|project_id|region|zone|network_id|subnet_id|public_ip|provider_id|probe_protocol|probe_port|capture_interface|ignore_ports|ignore_ips|flow_allow_cidrs|flow_deny_cidrs|notes
+```
+
+Backend metadata is applied at backend startup and during agent registration,
+not continuously on every API request.
+
+The `-` values mean: use script defaults or command-line key argument.
 
 Per-VM keys are also supported:
 
 ```text
-VMLENS_VM_TESTING_A_1_SSH_KEY=~/.ssh/id_ed25519_vmlens_a1
-VMLENS_VM_TESTING_A_2_SSH_KEY=~/.ssh/id_ed25519_vmlens_a2
+testing-a-1|10.20.20.130|ubuntu|~/.ssh/id_ed25519_vmlens_a1|-|-|ubuntu@10.20.20.199
+testing-a-2|10.20.20.199|ubuntu|~/.ssh/id_ed25519_vmlens_a2|-|-|-
 ```
 
 If SSH already works through `~/.ssh/config` or `ssh-agent`, set the key to
 `agent` or `none`:
 
 ```text
-VMLENS_VM_TESTING_A_3_SSH_KEY=agent
+testing-a-3|10.20.20.220|ubuntu|agent|-|-|-
 ```
 
 Password-based SSH may prompt interactively, but key-based access is recommended

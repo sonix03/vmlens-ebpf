@@ -15,13 +15,15 @@ cd /mnt/c/Documents/Ionext/vmlens-ebpf
 docker compose up -d --build
 ```
 
-Optional but recommended local configuration:
+Optional but recommended local VM inventory:
 
 ```bash
-cp configs/local.env.example configs/local.env
+cp configs/vms.example configs/vms.local
 ```
 
-Edit `configs/local.env` for VM list, SSH user, and per-VM SSH key path.
+Edit `configs/vms.local` for VM aliases, SSH user/key overrides, and proxy jumps.
+When an alias row host matches a VM private IP, that alias is used as the UI
+display name.
 
 Check:
 
@@ -40,7 +42,7 @@ http://localhost:3000
 
 ## 2. Local: start tunnel to cloud VM
 
-If `configs/local.env` is configured, run:
+If `configs/vms.local` is configured, run:
 
 ```bash
 bash scripts/vmlens-tunnel.sh list

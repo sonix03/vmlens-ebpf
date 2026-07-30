@@ -39,32 +39,27 @@ docs/
 Copy examples before editing machine-specific values:
 
 ```bash
-cp configs/local.env.example configs/local.env
+cp configs/vms.example configs/vms.local
 ```
 
 Local files are ignored by git:
 
 ```text
-configs/local.env
 configs/vms.local
 ```
 
-Use `configs/local.env` for local SSH/tunnel defaults:
+Use `configs/vms.local` for the VM list:
 
 ```text
-VMLENS_SSH_USER
-VMLENS_SSH_KEY
-VMLENS_LOCAL_BACKEND
-VMLENS_REMOTE_BACKEND
-VMLENS_VM_PROFILES
-VMLENS_VM_<PROFILE>_ALIAS
-VMLENS_VM_<PROFILE>_HOST
-VMLENS_VM_<PROFILE>_SSH_USER
-VMLENS_VM_<PROFILE>_SSH_KEY
-VMLENS_VM_INVENTORY
-VMLENS_TUNNEL_STATE_DIR
-VMLENS_KEY_STATE_DIR
+alias|host|ssh_user|ssh_key|remote_backend|local_backend|proxy_jump|role|type|environment|owner|tenant_id|project_id|region|zone|network_id|subnet_id|public_ip|provider_id|probe_protocol|probe_port|capture_interface|ignore_ports|ignore_ips|flow_allow_cidrs|flow_deny_cidrs|notes
 ```
+
+The first seven fields drive the SSH tunnel script. The remaining fields are
+backend/cloud metadata applied once when the backend starts or when an agent
+registers. Changing this file requires a backend restart to re-apply metadata.
+
+Optional overrides can be passed as environment variables when needed:
+`SSH_USER`, `SSH_KEY`, `LOCAL_BACKEND`, `REMOTE_BACKEND`, `VM_INVENTORY`.
 
 ## Agent layout
 
