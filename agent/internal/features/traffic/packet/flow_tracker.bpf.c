@@ -18,8 +18,12 @@
  * The actual feature code lives next to its domain:
  * - traffic/packet: TC packet ingress/egress capture
  * - protocols/transport/tcp/connection: socket/kprobe connection capture
+ * - protocols/transport/tcp/rtt: TCP srtt_us sampling
+ * - protocols/transport/tcp/retrans: tcp_retransmit_skb counting
  */
 #include "../../protocols/transport/tcp/connection/connect.bpf.c"
+#include "../../protocols/transport/tcp/rtt/rtt.bpf.c"
+#include "../../protocols/transport/tcp/retrans/retrans.bpf.c"
 #include "tc_ingress.bpf.c"
 #include "tc_egress.bpf.c"
 

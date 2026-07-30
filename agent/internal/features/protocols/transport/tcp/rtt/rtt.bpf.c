@@ -5,10 +5,10 @@
 
 #include "rtt.bpf.h"
 
-/*
- * Active RTT today is produced by the connectivity probe and reduced in
- * reducer.go. Kernel RTT tracking will be added here when TCP_INFO or
- * SYN/SYN-ACK timing is enabled.
- */
+SEC("kprobe/tcp_rcv_established")
+int BPF_KPROBE(trace_tcp_rtt, struct sock *sk)
+{
+    return emit_tcp_rtt_sample(sk);
+}
 
 #endif // TRANSPORT_TCP_RTT_BPF_C
