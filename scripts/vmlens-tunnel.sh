@@ -2,8 +2,8 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
-config_file="${VMLENS_CONFIG:-${repo_dir}/configs/local.env}"
-if [[ -f "${config_file}" ]]; then
+config_file="${TUNNEL_CONFIG:-${VMLENS_CONFIG:-}}"
+if [[ -n "${config_file}" && -f "${config_file}" ]]; then
   # shellcheck disable=SC1090
   source "${config_file}"
 fi
@@ -18,17 +18,16 @@ Usage:
   bash scripts/vmlens-tunnel.sh forget-host <vm-alias-or-host>
 
 What it opens:
-  remote ${VMLENS_REMOTE_BACKEND:-127.0.0.1:18080} -> local ${VMLENS_LOCAL_BACKEND:-127.0.0.1:8080}
+  remote ${REMOTE_BACKEND:-127.0.0.1:18080} -> local ${LOCAL_BACKEND:-127.0.0.1:8080}
 
 Config:
-  VMLENS_CONFIG=${config_file}
-  VMLENS_SSH_USER=ubuntu
-  VMLENS_SSH_KEY=~/.ssh/id_ed25519_vmlens | agent | none
-  VMLENS_SSH_PROXY_JUMP=
-  VMLENS_LOCAL_BACKEND=127.0.0.1:8080
-  VMLENS_REMOTE_BACKEND=127.0.0.1:18080
-  VMLENS_VM_PROFILES="testing_a_1 testing_a_2"
-  VMLENS_VM_INVENTORY=configs/vms.local
+  VM_INVENTORY=configs/vms.local
+  SSH_USER=ubuntu
+  SSH_KEY=~/.vmlens/keys/id_ed25519_vmlens | agent | none
+  SSH_PROXY_JUMP=
+  LOCAL_BACKEND=127.0.0.1:8080
+  REMOTE_BACKEND=127.0.0.1:18080
+  TUNNEL_CONFIG=<optional-env-file>
 EOF
 }
 
@@ -59,7 +58,7 @@ is_agent_key() {
 
 discover_default_key() {
   local candidate
-  for candidate in "${HOME}/.ssh/id_ed25519_vmlens" /mnt/c/Users/*/.ssh/id_ed25519_vmlens; do
+  for candidate in "${HOME}/.vmlens/keys/id_ed25519_vmlens" "${HOME}/.ssh/id_ed25519_vmlens" /mnt/c/Users/*/.ssh/id_ed25519_vmlens; do
     if [[ -r "${candidate}" ]]; then
       printf '%s\n' "${candidate}"
       return 0
@@ -68,43 +67,22 @@ discover_default_key() {
   return 1
 }
 
-profile_env_name() {
-  local profile="$1"
-  profile="${profile^^}"
-  profile="${profile//-/_}"
-  printf '%s\n' "${profile}"
-}
-
-env_value() {
-  local name="$1"
-  printf '%s\n' "${!name:-}"
-}
-
-profile_value() {
-  local profile="$1"
-  local field="$2"
-  local normalized
-  normalized="$(profile_env_name "${profile}")"
-  env_value "VMLENS_VM_${normalized}_${field}"
-}
-
-default_ssh_user="${SSH_USER:-${VMLENS_SSH_USER:-ubuntu}}"
-default_ssh_key="${SSH_KEY:-${VMLENS_SSH_KEY:-}}"
-default_ssh_proxy_jump="${SSH_PROXY_JUMP:-${VMLENS_SSH_PROXY_JUMP:-}}"
+default_ssh_user="${SSH_USER:-ubuntu}"
+default_ssh_key="${SSH_KEY:-}"
+default_ssh_proxy_jump="${SSH_PROXY_JUMP:-}"
 if [[ -z "${default_ssh_key}" ]]; then
   default_ssh_key="$(discover_default_key || true)"
 fi
-default_ssh_key="${default_ssh_key:-~/.ssh/id_ed25519_vmlens}"
-default_local_backend="${LOCAL_BACKEND:-${VMLENS_LOCAL_BACKEND:-127.0.0.1:8080}}"
-default_remote_backend="${REMOTE_BACKEND:-${VMLENS_REMOTE_BACKEND:-127.0.0.1:18080}}"
-state_dir="$(expand_path "${VMLENS_TUNNEL_STATE_DIR:-${HOME}/.vmlens/tunnels}")"
-key_state_dir="$(expand_path "${VMLENS_KEY_STATE_DIR:-${HOME}/.vmlens/keys}")"
-vm_profiles="${VMLENS_VM_PROFILES:-}"
-vm_inventory="${VMLENS_VM_INVENTORY:-${repo_dir}/configs/vms.local}"
+default_ssh_key="${default_ssh_key:-~/.vmlens/keys/id_ed25519_vmlens}"
+default_local_backend="${LOCAL_BACKEND:-127.0.0.1:8080}"
+default_remote_backend="${REMOTE_BACKEND:-127.0.0.1:18080}"
+state_dir="$(expand_path "${TUNNEL_STATE_DIR:-${HOME}/.vmlens/tunnels}")"
+key_state_dir="$(expand_path "${KEY_STATE_DIR:-${HOME}/.vmlens/keys}")"
+vm_inventory="${VM_INVENTORY:-${repo_dir}/configs/vms.local}"
 if [[ "${vm_inventory}" != /* ]]; then
   vm_inventory="${repo_dir}/${vm_inventory}"
 fi
-if [[ -z "${vm_profiles// }" && ! -f "${vm_inventory}" && -f "${repo_dir}/configs/vms.example" ]]; then
+if [[ ! -f "${vm_inventory}" && -f "${repo_dir}/configs/vms.example" ]]; then
   vm_inventory="${repo_dir}/configs/vms.example"
 fi
 
@@ -118,51 +96,13 @@ load_defaults() {
   remote_backend="${default_remote_backend}"
 }
 
-apply_profile() {
-  local profile="$1"
-  local alias host user key proxy_jump remote local
-  alias="$(profile_value "${profile}" "ALIAS")"
-  host="$(profile_value "${profile}" "HOST")"
-  user="$(profile_value "${profile}" "SSH_USER")"
-  key="$(profile_value "${profile}" "SSH_KEY")"
-  proxy_jump="$(profile_value "${profile}" "SSH_PROXY_JUMP")"
-  remote="$(profile_value "${profile}" "REMOTE_BACKEND")"
-  local="$(profile_value "${profile}" "LOCAL_BACKEND")"
-
-  vm_alias="${alias:-${profile}}"
-  vm_host="${host:-${vm_alias}}"
-  [[ -n "${user:-}" && "${user}" != "-" ]] && ssh_user="${user}"
-  [[ -n "${key:-}" && "${key}" != "-" ]] && ssh_key="${key}"
-  [[ -n "${proxy_jump:-}" && "${proxy_jump}" != "-" ]] && ssh_proxy_jump="${proxy_jump}"
-  [[ -n "${remote:-}" && "${remote}" != "-" ]] && remote_backend="${remote}"
-  [[ -n "${local:-}" && "${local}" != "-" ]] && local_backend="${local}"
-  return 0
-}
-
-has_env_profiles() {
-  [[ -n "${vm_profiles// }" ]]
-}
-
 resolve_vm() {
   local query="$1"
   load_defaults "${query}"
 
-  if has_env_profiles; then
-    local profile alias host
-    for profile in ${vm_profiles}; do
-      alias="$(profile_value "${profile}" "ALIAS")"
-      host="$(profile_value "${profile}" "HOST")"
-      if [[ "${query}" == "${profile}" || "${query}" == "${alias}" || "${query}" == "${host}" ]]; then
-        apply_profile "${profile}"
-        return
-      fi
-    done
-    return
-  fi
-
   if [[ -f "${vm_inventory}" ]]; then
-    local alias host user key remote local proxy_jump
-    while IFS='|' read -r alias host user key remote local proxy_jump; do
+    local alias host user key remote local proxy_jump role host_type environment owner tenant_id project_id region zone network_id subnet_id public_ip provider_id probe_protocol probe_port capture_interface ignore_ports ignore_ips flow_allow_cidrs flow_deny_cidrs notes
+    while IFS='|' read -r alias host user key remote local proxy_jump role host_type environment owner tenant_id project_id region zone network_id subnet_id public_ip provider_id probe_protocol probe_port capture_interface ignore_ports ignore_ips flow_allow_cidrs flow_deny_cidrs notes; do
       [[ -z "${alias}" || "${alias}" == \#* ]] && continue
       if [[ "${query}" == "${alias}" || "${query}" == "${host}" ]]; then
         vm_alias="${alias}"
@@ -172,10 +112,11 @@ resolve_vm() {
         [[ -n "${remote:-}" && "${remote}" != "-" ]] && remote_backend="${remote}"
         [[ -n "${local:-}" && "${local}" != "-" ]] && local_backend="${local}"
         [[ -n "${proxy_jump:-}" && "${proxy_jump}" != "-" ]] && ssh_proxy_jump="${proxy_jump}"
-        return
+        return 0
       fi
     done <"${vm_inventory}"
   fi
+  return 0
 }
 
 prepare_ssh_key() {
@@ -189,7 +130,7 @@ prepare_ssh_key() {
   key_path="$(expand_path "${requested}")"
   if [[ ! -r "${key_path}" ]]; then
     echo "SSH key not found: ${requested}" >&2
-    echo "Set VMLENS_SSH_KEY, SSH_KEY, or per-VM VMLENS_VM_<PROFILE>_SSH_KEY in ${config_file}" >&2
+    echo "Set SSH_KEY, pass the key as the third argument, or set per-VM ssh_key in ${vm_inventory}" >&2
     return 1
   fi
 
@@ -204,21 +145,13 @@ prepare_ssh_key() {
 
 for_each_vm() {
   local callback="$1"
-  if has_env_profiles; then
-    local profile
-    for profile in ${vm_profiles}; do
-      "${callback}" "${profile}"
-    done
-    return
-  fi
-
   if [[ ! -f "${vm_inventory}" ]]; then
     echo "VM inventory not found: ${vm_inventory}" >&2
     return 1
   fi
 
-  local alias host user key remote local
-  while IFS='|' read -r alias host user key remote local; do
+  local alias host user key remote local proxy_jump role host_type environment owner tenant_id project_id region zone network_id subnet_id public_ip provider_id probe_protocol probe_port capture_interface ignore_ports ignore_ips flow_allow_cidrs flow_deny_cidrs notes
+  while IFS='|' read -r alias host user key remote local proxy_jump role host_type environment owner tenant_id project_id region zone network_id subnet_id public_ip provider_id probe_protocol probe_port capture_interface ignore_ports ignore_ips flow_allow_cidrs flow_deny_cidrs notes; do
     [[ -z "${alias}" || "${alias}" == \#* ]] && continue
     "${callback}" "${alias}"
   done <"${vm_inventory}"
@@ -247,7 +180,7 @@ run_for_all() {
   run_one() {
     resolve_vm "$1"
     echo "==> ${sub_action} ${vm_alias} (${vm_host})"
-    if ! VMLENS_CONFIG="${config_file}" bash "$0" "${sub_action}" "${vm_alias}"; then
+    if ! TUNNEL_CONFIG="${config_file}" bash "$0" "${sub_action}" "${vm_alias}"; then
       failed=1
     fi
   }
