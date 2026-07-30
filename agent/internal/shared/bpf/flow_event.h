@@ -14,6 +14,8 @@ struct flow_event {
     __u8 direction;
     __u32 packets;
     __u32 error_count;
+    __u32 retransmissions;
+    __u32 rtt_us;
 } __attribute__((packed));
 
 #endif // FLOW_EVENT_H

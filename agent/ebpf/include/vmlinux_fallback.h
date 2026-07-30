@@ -81,6 +81,15 @@ struct sock {
 	struct sock_common __sk_common;
 } __attribute__((preserve_access_index));
 
+struct inet_connection_sock {
+	struct sock sk;
+} __attribute__((preserve_access_index));
+
+struct tcp_sock {
+	struct inet_connection_sock inet_conn;
+	__u32 srtt_us;
+} __attribute__((preserve_access_index));
+
 struct __sk_buff {
 	__u32 len;
 	__u32 pkt_type;
