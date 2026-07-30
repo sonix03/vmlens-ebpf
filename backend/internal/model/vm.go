@@ -5,6 +5,7 @@ import "time"
 type VM struct {
 	ID           string      `json:"id"`
 	Name         string      `json:"name"`
+	Type         string      `json:"type,omitempty"`
 	TenantID     string      `json:"tenant_id,omitempty"`
 	ProjectID    string      `json:"project_id,omitempty"`
 	Region       string      `json:"region,omitempty"`

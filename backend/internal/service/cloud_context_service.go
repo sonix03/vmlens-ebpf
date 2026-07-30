@@ -62,7 +62,7 @@ func (s *CloudContextService) Context(ctx context.Context, filter model.CloudCon
 func (s *CloudContextService) hosts(ctx context.Context, filter model.CloudContextFilter) ([]model.CloudHost, error) {
 	query := `
 		SELECT id, COALESCE(host_id, ''), name, name, COALESCE(tenant_id, ''), COALESCE(project_id, ''),
-		       COALESCE(region, ''), COALESCE(zone, ''), COALESCE(role, ''), 'virtual_machine',
+		       COALESCE(region, ''), COALESCE(zone, ''), COALESCE(role, ''), COALESCE(host_type, 'virtual_machine'),
 		       COALESCE(environment, ''), COALESCE(owner, ''), COALESCE(host(private_ip), ''),
 		       COALESCE(host(public_ip), ''), COALESCE(network_id, ''), COALESCE(subnet_id, ''),
 		       status, last_seen, discovered_by = 'agent'

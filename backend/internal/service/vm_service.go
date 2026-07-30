@@ -7,13 +7,29 @@ import (
 	"github.com/vmlens/vmlens/backend/internal/model"
 )
 
-type VMService struct{ pool *pgxpool.Pool }
+type VMService struct {
+	pool      *pgxpool.Pool
+	inventory *VMInventory
+}
 
-func NewVMService(pool *pgxpool.Pool) *VMService { return &VMService{pool: pool} }
+func NewVMService(pool *pgxpool.Pool, inventory ...*VMInventory) *VMService {
+	service := &VMService{pool: pool}
+	if len(inventory) > 0 {
+		service.inventory = inventory[0]
+	}
+	return service
+}
+
+func (s *VMService) ApplyInventoryAssignments(ctx context.Context) error {
+	if s.inventory == nil {
+		return nil
+	}
+	return s.inventory.ApplyToDatabase(ctx, s.pool)
+}
 
 func (s *VMService) List(ctx context.Context) ([]model.VM, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, COALESCE(tenant_id, ''), COALESCE(project_id, ''),
+		SELECT id, name, COALESCE(host_type, ''), COALESCE(tenant_id, ''), COALESCE(project_id, ''),
 		       COALESCE(region, ''), COALESCE(zone, ''), COALESCE(host(private_ip), ''),
 		       COALESCE(host(public_ip), ''), COALESCE(network_id, ''), COALESCE(subnet_id, ''),
 		       COALESCE(mac_address, ''), COALESCE(host_id, ''), COALESCE(role, ''),
@@ -29,7 +45,7 @@ func (s *VMService) List(ctx context.Context) ([]model.VM, error) {
 	for rows.Next() {
 		var vm model.VM
 		if err := rows.Scan(
-			&vm.ID, &vm.Name, &vm.TenantID, &vm.ProjectID, &vm.Region, &vm.Zone,
+			&vm.ID, &vm.Name, &vm.Type, &vm.TenantID, &vm.ProjectID, &vm.Region, &vm.Zone,
 			&vm.PrivateIP, &vm.PublicIP, &vm.NetworkID, &vm.SubnetID, &vm.MACAddress,
 			&vm.HostID, &vm.Role, &vm.Environment, &vm.Owner, &vm.DiscoveredBy,
 			&vm.AgentID, &vm.MachineID, &vm.Status, &vm.FirstSeen, &vm.LastSeen,
