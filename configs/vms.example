@@ -1,27 +1,30 @@
 # VMLens fallback VM inventory.
 #
-# Prefer configs/local.env and VMLENS_VM_PROFILES for new setups.
-#
 # Copy this file to:
 #
 #   configs/vms.local
 #
-# Format:
+# Format v2:
 #
-#   alias|host|ssh_user|ssh_key|remote_backend|local_backend
+#   alias|host|ssh_user|ssh_key|remote_backend|local_backend|proxy_jump|role|type|environment|owner|tenant_id|project_id|region|zone|network_id|subnet_id|public_ip|provider_id|probe_protocol|probe_port|capture_interface|ignore_ports|ignore_ips|flow_allow_cidrs|flow_deny_cidrs|notes
 #
 # Fields:
 #
-# - alias: readable name used by scripts.
+# - alias: readable name used by scripts and backend/frontend display.
 # - host: VM IP/hostname reachable over SSH from local laptop.
-# - ssh_user: SSH username, or "-" to use VMLENS_SSH_USER.
-# - ssh_key: SSH key path, "agent"/"none" for SSH config/ssh-agent, or "-" to use VMLENS_SSH_KEY.
-# - remote_backend: reverse tunnel listen address inside VM, or "-" to use VMLENS_REMOTE_BACKEND.
-# - local_backend: local dashboard API address, or "-" to use VMLENS_LOCAL_BACKEND.
+# - ssh_user: SSH username, or "-" to use SSH_USER/default ubuntu.
+# - ssh_key: SSH key path, "agent"/"none" for SSH config/ssh-agent, or "-" to use SSH_KEY/default key.
+# - remote_backend: reverse tunnel listen address inside VM, or "-" to use REMOTE_BACKEND/default 127.0.0.1:18080.
+# - local_backend: local dashboard API address, or "-" to use LOCAL_BACKEND/default 127.0.0.1:8080.
+# - proxy_jump: optional SSH jump host, or "-" for direct SSH.
+# - role/type/environment/owner/tenant_id/project_id/region/zone/network_id/subnet_id/public_ip/provider_id: backend/cloud metadata.
+# - probe_protocol/probe_port: connectivity probe target for this VM.
+# - capture_interface/ignore_ports/ignore_ips/flow_allow_cidrs/flow_deny_cidrs: agent/network tracking defaults.
+# - notes: local operator notes.
 #
 # One shared key for all VMs is normal if the public key is installed on every VM.
 # Per-VM keys are also supported by setting different ssh_key values per row.
 
-testing-a-1|10.20.20.130|-|-|-|-
-testing-a-2|10.20.20.199|-|-|-|-
-testing-a-3|10.20.20.188|-|-|-|-
+testing-a-1|10.20.20.130|-|-|-|-|-|application|virtual_machine|external-vm|platform|local|vmlens-lab|openstack-local|zone-a|production-private-network|app-subnet|-|openstack-vm-testing-a-1|tcp|18081|ens3|18080,18081,18082,30033,30035,8080|10.20.20.125|10.20.20.0/24|10.20.20.125/32|direct from Windows; use proxy_jump if WSL cannot reach it
+testing-a-2|10.20.20.199|-|-|-|-|-|bastion|virtual_machine|external-vm|platform|local|vmlens-lab|openstack-local|zone-a|production-private-network|management-subnet|-|openstack-vm-testing-a-2|tcp|18081|ens3|18080,18081,18082,30033,30035,8080|10.20.20.125|10.20.20.0/24|10.20.20.125/32|direct SSH from WSL/Windows
+testing-a-3|10.20.20.220|-|-|-|-|-|worker|virtual_machine|external-vm|platform|local|vmlens-lab|openstack-local|zone-a|production-private-network|worker-subnet|-|openstack-vm-testing-a-3|tcp|18081|ens3|18080,18081,18082,30033,30035,8080|10.20.20.125|10.20.20.0/24|10.20.20.125/32|direct SSH from WSL/Windows
