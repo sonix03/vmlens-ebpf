@@ -42,20 +42,27 @@ func run() error {
 		return err
 	}
 	hub := realtime.New()
-	agents := service.NewAgentService(pool, hub)
-	vms := service.NewVMService(pool)
+	vmInventory := service.NewVMInventory(cfg.VMInventoryPath)
+	if err := vmInventory.Load(); err != nil {
+		log.Printf("VM inventory load: %v", err)
+	}
+	agents := service.NewAgentService(pool, hub, vmInventory)
+	vms := service.NewVMService(pool, vmInventory)
 	graphVisibility := service.GraphVisibility{
-		ExcludedPorts: cfg.Graph.ExcludedPorts,
+		ExcludedPorts: mergeInts(cfg.Graph.ExcludedPorts, vmInventory.IgnoredPorts()),
 		AllowedPorts:  cfg.Graph.AllowedPorts,
-		ExcludedIPs:   cfg.Graph.ExcludedIPs,
+		ExcludedIPs:   mergeStrings(cfg.Graph.ExcludedIPs, vmInventory.IgnoredIPs()),
 		IncludeIdle:   cfg.Graph.IncludeIdle,
 	}
 	flows := service.NewFlowService(pool, classifier, hub, graphVisibility)
-	connections := service.NewConnectionService(pool, hub)
+	connections := service.NewConnectionService(pool, hub, vmInventory)
 	connectionStates := service.NewConnectionStateService(pool, cfg.FlowActiveWindow)
 	cloudContext := service.NewCloudContextService(pool, cloud.NewNoopProvider())
 	graph := service.NewGraphService(pool, vms, cfg.FlowActiveWindow, graphVisibility)
 	stats := service.NewStatsService(pool)
+	if err := vms.ApplyInventoryAssignments(ctx); err != nil {
+		log.Printf("VM inventory assignment: %v", err)
+	}
 	handlers := &apihttp.Handlers{
 		Pool: pool, Agents: agents, VMs: vms, Flows: flows, Connections: connections,
 		ConnectionStates: connectionStates, Cloud: cloudContext, Graph: graph, Stats: stats,
@@ -99,4 +106,34 @@ func run() error {
 		}
 		return err
 	}
+}
+
+func mergeInts(groups ...[]int) []int {
+	seen := map[int]bool{}
+	var out []int
+	for _, group := range groups {
+		for _, value := range group {
+			if value <= 0 || seen[value] {
+				continue
+			}
+			seen[value] = true
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func mergeStrings(groups ...[]string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, group := range groups {
+		for _, value := range group {
+			if value == "" || seen[value] {
+				continue
+			}
+			seen[value] = true
+			out = append(out, value)
+		}
+	}
+	return out
 }

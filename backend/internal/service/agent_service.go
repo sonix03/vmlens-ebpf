@@ -17,8 +17,9 @@ import (
 )
 
 type AgentService struct {
-	pool *pgxpool.Pool
-	hub  *realtime.Hub
+	pool      *pgxpool.Pool
+	hub       *realtime.Hub
+	inventory *VMInventory
 }
 
 const (
@@ -26,8 +27,12 @@ const (
 	agentStaleWindow  = 5 * time.Minute
 )
 
-func NewAgentService(pool *pgxpool.Pool, hub *realtime.Hub) *AgentService {
-	return &AgentService{pool: pool, hub: hub}
+func NewAgentService(pool *pgxpool.Pool, hub *realtime.Hub, inventory ...*VMInventory) *AgentService {
+	service := &AgentService{pool: pool, hub: hub}
+	if len(inventory) > 0 {
+		service.inventory = inventory[0]
+	}
+	return service
 }
 
 func (s *AgentService) Register(ctx context.Context, registration model.AgentRegistration) (model.RegistrationResult, error) {
@@ -62,12 +67,35 @@ func (s *AgentService) Register(ctx context.Context, registration model.AgentReg
 	if vmID == "" {
 		vmID = stableVMID(registration, primaryIP, primaryMAC)
 	}
+	vmName := registration.Hostname
+	tenantID := registration.TenantID
+	projectID := registration.ProjectID
+	environment := registration.Environment
+	hostID, role, hostType, owner, region, zone, networkID, subnetID := "", "", "", "", "", "", "", ""
+	if s.inventory != nil {
+		if entry, ok := s.inventory.EntryForIP(primaryIP); ok {
+			vmName = firstNonEmpty([]string{entry.Alias}, []string{vmName})
+			tenantID = firstNonEmpty([]string{entry.TenantID}, []string{tenantID})
+			projectID = firstNonEmpty([]string{entry.ProjectID}, []string{projectID})
+			environment = firstNonEmpty([]string{entry.Environment}, []string{environment})
+			publicIP = firstNonEmpty([]string{entry.PublicIP}, []string{publicIP})
+			hostID = entry.ProviderID
+			role = entry.Role
+			hostType = entry.Type
+			owner = entry.Owner
+			region = entry.Region
+			zone = entry.Zone
+			networkID = entry.NetworkID
+			subnetID = entry.SubnetID
+		}
+	}
 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO vms (
 			id, name, tenant_id, project_id, private_ip, public_ip, mac_address,
+			host_id, role, host_type, environment, owner, region, zone, network_id, subnet_id,
 			discovered_by, agent_id, machine_id, status, first_seen, last_seen
-		) VALUES ($1, $2, $3, $4, $5::inet, $6::inet, $7, 'agent', $8, $9, 'online', NOW(), NOW())
+		) VALUES ($1, $2, $3, $4, $5::inet, $6::inet, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'agent', $17, $18, 'online', NOW(), NOW())
 		ON CONFLICT (id) DO UPDATE SET
 			name = EXCLUDED.name,
 			tenant_id = COALESCE(EXCLUDED.tenant_id, vms.tenant_id),
@@ -75,11 +103,22 @@ func (s *AgentService) Register(ctx context.Context, registration model.AgentReg
 			private_ip = COALESCE(EXCLUDED.private_ip, vms.private_ip),
 			public_ip = COALESCE(EXCLUDED.public_ip, vms.public_ip),
 			mac_address = COALESCE(EXCLUDED.mac_address, vms.mac_address),
+			host_id = COALESCE(EXCLUDED.host_id, vms.host_id),
+			role = COALESCE(EXCLUDED.role, vms.role),
+			host_type = COALESCE(EXCLUDED.host_type, vms.host_type),
+			environment = COALESCE(EXCLUDED.environment, vms.environment),
+			owner = COALESCE(EXCLUDED.owner, vms.owner),
+			region = COALESCE(EXCLUDED.region, vms.region),
+			zone = COALESCE(EXCLUDED.zone, vms.zone),
+			network_id = COALESCE(EXCLUDED.network_id, vms.network_id),
+			subnet_id = COALESCE(EXCLUDED.subnet_id, vms.subnet_id),
 			agent_id = EXCLUDED.agent_id,
 			machine_id = COALESCE(EXCLUDED.machine_id, vms.machine_id),
 			status = 'online', last_seen = NOW()`,
-		vmID, registration.Hostname, nullIfEmpty(registration.TenantID), nullIfEmpty(registration.ProjectID), nullIfEmpty(primaryIP),
-		nullIfEmpty(publicIP), nullIfEmpty(primaryMAC), registration.AgentID, nullIfEmpty(registration.MachineID))
+		vmID, vmName, nullIfEmpty(tenantID), nullIfEmpty(projectID), nullIfEmpty(primaryIP),
+		nullIfEmpty(publicIP), nullIfEmpty(primaryMAC), nullIfEmpty(hostID), nullIfEmpty(role), nullIfEmpty(hostType),
+		nullIfEmpty(environment), nullIfEmpty(owner), nullIfEmpty(region), nullIfEmpty(zone), nullIfEmpty(networkID),
+		nullIfEmpty(subnetID), registration.AgentID, nullIfEmpty(registration.MachineID))
 	if err != nil {
 		return model.RegistrationResult{}, fmt.Errorf("upsert VM: %w", err)
 	}
@@ -95,7 +134,7 @@ func (s *AgentService) Register(ctx context.Context, registration model.AgentReg
 			project_id = COALESCE(EXCLUDED.project_id, agents.project_id),
 			status = 'online', last_seen = NOW()`,
 		registration.AgentID, vmID, registration.Hostname, nullIfEmpty(registration.MachineID),
-		nullIfEmpty(registration.OS), nullIfEmpty(registration.Kernel), nullIfEmpty(registration.AgentVersion), nullIfEmpty(registration.Environment), nullIfEmpty(registration.ProjectID))
+		nullIfEmpty(registration.OS), nullIfEmpty(registration.Kernel), nullIfEmpty(registration.AgentVersion), nullIfEmpty(environment), nullIfEmpty(projectID))
 	if err != nil {
 		return model.RegistrationResult{}, fmt.Errorf("upsert agent: %w", err)
 	}
@@ -114,13 +153,13 @@ func (s *AgentService) Register(ctx context.Context, registration model.AgentReg
 			return model.RegistrationResult{}, fmt.Errorf("upsert interface %s: %w", iface.Name, err)
 		}
 		if iface.IPAddress != "" {
-			if err := s.resolveUnknownHost(ctx, tx, vmID, registration.TenantID, iface.IPAddress); err != nil {
+			if err := s.resolveUnknownHost(ctx, tx, vmID, tenantID, iface.IPAddress); err != nil {
 				return model.RegistrationResult{}, err
 			}
 		}
 	}
 	if primaryIP != "" {
-		if err := s.resolveUnknownHost(ctx, tx, vmID, registration.TenantID, primaryIP); err != nil {
+		if err := s.resolveUnknownHost(ctx, tx, vmID, tenantID, primaryIP); err != nil {
 			return model.RegistrationResult{}, err
 		}
 	}
@@ -155,6 +194,10 @@ func (s *AgentService) resolveIdentity(ctx context.Context, tx pgx.Tx, registrat
 		}{`SELECT vm_id FROM vm_interfaces WHERE mac_address = $1 ORDER BY updated_at DESC LIMIT 1`, primaryMAC})
 	}
 	if primaryIP != "" {
+		queries = append(queries, struct {
+			sql string
+			arg any
+		}{`SELECT id FROM vms WHERE private_ip = $1::inet ORDER BY last_seen DESC LIMIT 1`, primaryIP})
 		queries = append(queries, struct {
 			sql string
 			arg any

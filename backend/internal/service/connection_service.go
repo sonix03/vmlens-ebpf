@@ -22,12 +22,17 @@ const (
 )
 
 type ConnectionService struct {
-	pool *pgxpool.Pool
-	hub  *realtime.Hub
+	pool      *pgxpool.Pool
+	hub       *realtime.Hub
+	inventory *VMInventory
 }
 
-func NewConnectionService(pool *pgxpool.Pool, hub *realtime.Hub) *ConnectionService {
-	return &ConnectionService{pool: pool, hub: hub}
+func NewConnectionService(pool *pgxpool.Pool, hub *realtime.Hub, inventory ...*VMInventory) *ConnectionService {
+	service := &ConnectionService{pool: pool, hub: hub}
+	if len(inventory) > 0 {
+		service.inventory = inventory[0]
+	}
+	return service
 }
 
 func (s *ConnectionService) Targets(ctx context.Context, agentID string) ([]model.ConnectionProbeTarget, error) {
@@ -81,6 +86,9 @@ func (s *ConnectionService) Targets(ctx context.Context, agentID string) ([]mode
 			&target.DestIP, &target.Protocol, &target.DestPort, &target.LastSeen,
 		); err != nil {
 			return nil, err
+		}
+		if s.inventory != nil {
+			target.Protocol, target.DestPort = s.inventory.ProbeForIP(target.DestIP, target.Protocol, target.DestPort)
 		}
 		targets = append(targets, target)
 	}

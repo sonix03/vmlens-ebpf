@@ -25,13 +25,16 @@ services:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       FLOW_ACTIVE_WINDOW: ${FLOW_ACTIVE_WINDOW:-4s}
       GRAPH_INCLUDE_IDLE: ${GRAPH_INCLUDE_IDLE:-true}
-      GRAPH_EXCLUDED_PORTS: ${GRAPH_EXCLUDED_PORTS:-22,53,123,30033,30035,8080,18080,18081,18082}
-      GRAPH_EXCLUDED_IPS: ${GRAPH_EXCLUDED_IPS:-10.20.20.125,127.0.0.1}
+      GRAPH_EXCLUDED_PORTS: ${GRAPH_EXCLUDED_PORTS:-22,53,123}
+      GRAPH_EXCLUDED_IPS: ${GRAPH_EXCLUDED_IPS:-127.0.0.1}
       STATUS_SWEEP_PERIOD: ${STATUS_SWEEP_PERIOD:-10s}
       VM_DELETE_AFTER: ${VM_DELETE_AFTER:-0}
+      VM_INVENTORY_PATH: ${VM_INVENTORY_PATH:-/etc/vmlens/configs/vms.local}
     depends_on:
       datastore:
         condition: service_healthy
+    volumes:
+      - ./configs:/etc/vmlens/configs:ro
     ports:
       - "8080:8080"
 
