@@ -23,6 +23,26 @@ func TestVMDeleteAfterRejectsUnsafeWindow(t *testing.T) {
 	}
 }
 
+func TestVMInventoryPath(t *testing.T) {
+	t.Setenv("VM_INVENTORY_PATH", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.VMInventoryPath != "/etc/vmlens/configs/vms.local" {
+		t.Fatalf("unexpected default VM inventory path: %q", cfg.VMInventoryPath)
+	}
+
+	t.Setenv("VM_INVENTORY_PATH", "/tmp/vms.local")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.VMInventoryPath != "/tmp/vms.local" {
+		t.Fatalf("unexpected override VM inventory path: %q", cfg.VMInventoryPath)
+	}
+}
+
 func TestFlowActiveWindow(t *testing.T) {
 	t.Setenv("FLOW_ACTIVE_WINDOW", "5s")
 	cfg, err := Load()
@@ -69,7 +89,7 @@ func TestUnregisteredInternalScopeRejectsInvalidValue(t *testing.T) {
 	}
 }
 
-func TestGraphDefaultsShowIdleConnectionsAndHideTelemetryNoise(t *testing.T) {
+func TestGraphDefaultsShowIdleConnectionsAndHideBasicNoise(t *testing.T) {
 	t.Setenv("GRAPH_INCLUDE_IDLE", "")
 	t.Setenv("GRAPH_EXCLUDED_PORTS", "")
 	cfg, err := Load()
@@ -79,7 +99,7 @@ func TestGraphDefaultsShowIdleConnectionsAndHideTelemetryNoise(t *testing.T) {
 	if !cfg.Graph.IncludeIdle {
 		t.Fatal("default graph should keep idle connection lines visible")
 	}
-	wantPorts := map[int]bool{22: true, 53: true, 123: true, 30033: true, 30035: true, 8080: true, 18080: true, 18081: true, 18082: true}
+	wantPorts := map[int]bool{22: true, 53: true, 123: true}
 	for _, port := range cfg.Graph.ExcludedPorts {
 		delete(wantPorts, port)
 	}

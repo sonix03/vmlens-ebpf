@@ -17,6 +17,7 @@ type Config struct {
 	FlowActiveWindow          time.Duration
 	StatusSweepPeriod         time.Duration
 	VMDeleteAfter             time.Duration
+	VMInventoryPath           string
 	Graph                     GraphConfig
 }
 
@@ -37,10 +38,11 @@ func Load() (Config, error) {
 		FlowActiveWindow:          4 * time.Second,
 		StatusSweepPeriod:         30 * time.Second,
 		VMDeleteAfter:             0,
+		VMInventoryPath:           env("VM_INVENTORY_PATH", "/etc/vmlens/configs/vms.local"),
 		Graph: GraphConfig{
-			ExcludedPorts: intCSV(env("GRAPH_EXCLUDED_PORTS", "22,53,123,30033,30035,8080,18080,18081,18082")),
+			ExcludedPorts: intCSV(env("GRAPH_EXCLUDED_PORTS", "22,53,123")),
 			AllowedPorts:  intCSV(env("GRAPH_ALLOWED_PORTS", "")),
-			ExcludedIPs:   csv(env("GRAPH_EXCLUDED_IPS", "10.20.20.125,127.0.0.1")),
+			ExcludedIPs:   csv(env("GRAPH_EXCLUDED_IPS", "127.0.0.1")),
 			IncludeIdle:   envBool("GRAPH_INCLUDE_IDLE", true),
 		},
 	}
