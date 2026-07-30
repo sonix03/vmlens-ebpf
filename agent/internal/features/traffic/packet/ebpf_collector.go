@@ -36,6 +36,8 @@ type rawFlowEvent struct {
 	Direction   uint8
 	Packets     uint32
 	ErrorCount  uint32
+	Retransmits uint32
+	RTTUS       uint32
 }
 
 type EBPFOptions struct {
@@ -51,8 +53,17 @@ type EBPFCollector struct {
 	ifaceName    string
 	collection   *cebpf.Collection
 	links        []link.Link
+	kprobes      []string
+	kprobeMisses []string
 	reader       *ringbuf.Reader
 	closeOnce    sync.Once
+}
+
+type kprobeAttachment struct {
+	program  string
+	symbol   string
+	ret      bool
+	required bool
 }
 
 func NewEBPF(registration telemetry.Registration, options EBPFOptions) (*EBPFCollector, error) {
@@ -87,6 +98,9 @@ func NewEBPF(registration telemetry.Registration, options EBPFOptions) (*EBPFCol
 
 	if mode == "tc" || mode == "auto" {
 		if err := c.attachTCX(); err == nil {
+			if err := c.attachKprobes(tcpMetricAttachments()); err != nil {
+				return fail(err)
+			}
 			if eventsMap := collection.Maps["events"]; eventsMap != nil {
 				c.reader, err = ringbuf.NewReader(eventsMap)
 				if err != nil {
@@ -104,45 +118,8 @@ func NewEBPF(registration telemetry.Registration, options EBPFOptions) (*EBPFCol
 		return fail(fmt.Errorf("tc capture requested but no TCX program was attached"))
 	}
 
-	attachments := []struct {
-		program  string
-		symbol   string
-		ret      bool
-		required bool
-	}{
-		{"trace_tcp_connect", "tcp_v4_connect", false, true},
-		{"trace_tcp_v6_connect", "tcp_v6_connect", false, false},
-		{"trace_tcp_accept", "inet_csk_accept", true, true},
-		{"trace_tcp_send", "tcp_sendmsg", false, true},
-		{"trace_tcp_send_ret", "tcp_sendmsg", true, true},
-		{"trace_tcp_recv", "tcp_recvmsg", false, true},
-		{"trace_tcp_recv_ret", "tcp_recvmsg", true, true},
-		{"trace_udp_send", "udp_sendmsg", false, false},
-		{"trace_udp_send_ret", "udp_sendmsg", true, false},
-		{"trace_udp_recv", "udp_recvmsg", false, false},
-		{"trace_udp_recv_ret", "udp_recvmsg", true, false},
-	}
-	for _, item := range attachments {
-		program := collection.Programs[item.program]
-		if program == nil {
-			if item.required {
-				return fail(fmt.Errorf("program %s missing", item.program))
-			}
-			continue
-		}
-		var attached link.Link
-		if item.ret {
-			attached, err = link.Kretprobe(item.symbol, program, nil)
-		} else {
-			attached, err = link.Kprobe(item.symbol, program, nil)
-		}
-		if err != nil {
-			if item.required {
-				return fail(fmt.Errorf("attach %s: %w", item.program, err))
-			}
-			continue
-		}
-		c.links = append(c.links, attached)
+	if err := c.attachKprobes(append(connectionAttachments(), tcpMetricAttachments()...)); err != nil {
+		return fail(err)
 	}
 	c.captureMode = "kprobe"
 	eventsMap := collection.Maps["events"]
@@ -156,8 +133,79 @@ func NewEBPF(registration telemetry.Registration, options EBPFOptions) (*EBPFCol
 	return c, nil
 }
 
+func connectionAttachments() []kprobeAttachment {
+	return []kprobeAttachment{
+		{"trace_tcp_connect", "tcp_v4_connect", false, true},
+		{"trace_tcp_v6_connect", "tcp_v6_connect", false, false},
+		{"trace_tcp_accept", "inet_csk_accept", true, true},
+		{"trace_tcp_send", "tcp_sendmsg", false, true},
+		{"trace_tcp_send_ret", "tcp_sendmsg", true, true},
+		{"trace_tcp_recv", "tcp_recvmsg", false, true},
+		{"trace_tcp_recv_ret", "tcp_recvmsg", true, true},
+		{"trace_udp_send", "udp_sendmsg", false, false},
+		{"trace_udp_send_ret", "udp_sendmsg", true, false},
+		{"trace_udp_recv", "udp_recvmsg", false, false},
+		{"trace_udp_recv_ret", "udp_recvmsg", true, false},
+	}
+}
+
+func tcpMetricAttachments() []kprobeAttachment {
+	return []kprobeAttachment{
+		{"trace_tcp_rtt", "tcp_rcv_established", false, false},
+		{"trace_tcp_retransmit", "tcp_retransmit_skb", false, false},
+	}
+}
+
+func (c *EBPFCollector) attachKprobes(attachments []kprobeAttachment) error {
+	for _, item := range attachments {
+		program := c.collection.Programs[item.program]
+		if program == nil {
+			if item.required {
+				return fmt.Errorf("program %s missing", item.program)
+			}
+			c.kprobeMisses = append(c.kprobeMisses, fmt.Sprintf("%s missing", item.program))
+			continue
+		}
+		var attached link.Link
+		var err error
+		if item.ret {
+			attached, err = link.Kretprobe(item.symbol, program, nil)
+		} else {
+			attached, err = link.Kprobe(item.symbol, program, nil)
+		}
+		if err != nil {
+			if item.required {
+				return fmt.Errorf("attach %s: %w", item.program, err)
+			}
+			c.kprobeMisses = append(c.kprobeMisses, fmt.Sprintf("%s attach failed: %v", item.program, err))
+			continue
+		}
+		c.links = append(c.links, attached)
+		c.kprobes = append(c.kprobes, fmt.Sprintf("%s/%s", item.program, item.symbol))
+	}
+	return nil
+}
+
 func (c *EBPFCollector) Mode() string {
 	return c.captureMode
+}
+
+func (c *EBPFCollector) AttachedKprobes() []string {
+	if c == nil || len(c.kprobes) == 0 {
+		return nil
+	}
+	out := make([]string, len(c.kprobes))
+	copy(out, c.kprobes)
+	return out
+}
+
+func (c *EBPFCollector) DisabledKprobes() []string {
+	if c == nil || len(c.kprobeMisses) == 0 {
+		return nil
+	}
+	out := make([]string, len(c.kprobeMisses))
+	copy(out, c.kprobeMisses)
+	return out
 }
 
 func (c *EBPFCollector) attachTCX() error {
@@ -286,10 +334,11 @@ func (c *EBPFCollector) convert(raw rawFlowEvent) pipeline.FlowMetric {
 	event := pipeline.FlowMetric{
 		AgentID: c.registration.AgentID, SrcIP: sourceIP, DstIP: destinationIP,
 		SrcPort: srcPort, DstPort: dstPort, Protocol: protocol,
-		Direction: flowDirection, Source: "tc_ebpf",
+		Direction: flowDirection, Source: rawEventSource(raw),
 		ByteCount: int64(raw.Bytes), PacketCount: int64(raw.Packets), ConnectionCount: int64(raw.Connections),
 		RequestCount: tcpconnection.InferRequestCount(protocol, flowDirection, int64(raw.Bytes), raw.Connections, raw.ErrorCount),
-		ErrorCount:   int64(raw.ErrorCount), FirstSeen: now, LastSeen: now,
+		ErrorCount:   int64(raw.ErrorCount), RetransmissionCount: int64(raw.Retransmits),
+		RTTMs: float64(raw.RTTUS) / 1000, FirstSeen: now, LastSeen: now,
 	}
 	if c.ifaceName != "" {
 		event.Interface = c.ifaceName
@@ -297,6 +346,13 @@ func (c *EBPFCollector) convert(raw rawFlowEvent) pipeline.FlowMetric {
 		event.Interface = c.registration.Interfaces[0].Name
 	}
 	return event
+}
+
+func rawEventSource(raw rawFlowEvent) string {
+	if raw.Bytes == 0 && raw.Packets == 0 && raw.Connections == 0 && (raw.Retransmits > 0 || raw.RTTUS > 0) {
+		return "tcp_metric_ebpf"
+	}
+	return "tc_ebpf"
 }
 
 func (c *EBPFCollector) defaultInterfaceName() string {

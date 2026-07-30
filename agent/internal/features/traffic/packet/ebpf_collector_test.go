@@ -64,3 +64,32 @@ func TestIgnoredPortKeysDropsInvalidAndDuplicatePorts(t *testing.T) {
 		}
 	}
 }
+
+func TestConvertMapsTCPKernelMetrics(t *testing.T) {
+	var src, dst [16]byte
+	copy(src[:], net.ParseIP("10.20.20.130").To4())
+	copy(dst[:], net.ParseIP("10.20.20.199").To4())
+	collector := EBPFCollector{registration: telemetry.Registration{AgentID: "agent-1"}}
+
+	event := collector.convert(rawFlowEvent{
+		SrcAddr:     src,
+		DstAddr:     dst,
+		SrcPort:     49000,
+		DstPort:     8081,
+		Family:      2,
+		Protocol:    6,
+		Direction:   2,
+		Retransmits: 3,
+		RTTUS:       12500,
+	})
+
+	if event.Source != "tcp_metric_ebpf" {
+		t.Fatalf("source=%s, want tcp_metric_ebpf", event.Source)
+	}
+	if event.RetransmissionCount != 3 {
+		t.Fatalf("retrans=%d, want 3", event.RetransmissionCount)
+	}
+	if event.RTTMs != 12.5 {
+		t.Fatalf("rtt=%f, want 12.5", event.RTTMs)
+	}
+}

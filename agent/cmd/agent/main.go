@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -70,6 +71,12 @@ func run() error {
 		}
 		source = ebpfSource
 		log.Printf("eBPF collector loaded object=%s mode=%s interface=%s", cfg.BPFObject, ebpfSource.Mode(), cfg.CaptureInterface)
+		if attached := ebpfSource.AttachedKprobes(); len(attached) > 0 {
+			log.Printf("eBPF kprobes attached: %s", strings.Join(attached, ", "))
+		}
+		if disabled := ebpfSource.DisabledKprobes(); len(disabled) > 0 {
+			log.Printf("eBPF optional kprobes disabled: %s", strings.Join(disabled, "; "))
+		}
 		if ebpfSource.Mode() != "tc" {
 			icmpSource, err := icmp.NewCollector(registration, cfg.CaptureInterface)
 			if err != nil {
