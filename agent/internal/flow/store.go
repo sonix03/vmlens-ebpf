@@ -100,7 +100,6 @@ func (s *State) Merge(next State) {
 	s.Traffic.Packets.Count += next.Traffic.Packets.Count
 	s.Traffic.Direction.Current = firstNonEmpty(next.Traffic.Direction.Current, s.Traffic.Direction.Current)
 	s.TCP.Connection.OpenCount += next.TCP.Connection.OpenCount
-	s.TCP.Connection.CloseCount += next.TCP.Connection.CloseCount
 	s.TCP.Connection.ErrorCount += next.TCP.Connection.ErrorCount
 	s.TCP.Connection.RequestHint += next.TCP.Connection.RequestHint
 	mergeRTT(&s.TCP.RTT, next.TCP.RTT)
