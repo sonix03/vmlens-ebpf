@@ -37,6 +37,8 @@ type rawFlowEvent struct {
 	ErrorCount  uint32
 	Retransmits uint32
 	RTTUS       uint32
+	AppDelayUS  uint32
+	HTTPStatus  uint16
 }
 
 type EBPFOptions struct {
@@ -338,7 +340,8 @@ func (c *EBPFCollector) convert(raw rawFlowEvent) pipeline.FlowMetric {
 		Direction: flowDirection, Source: rawEventSource(raw),
 		ByteCount: int64(raw.Bytes), PacketCount: int64(raw.Packets), ConnectionCount: int64(raw.Connections),
 		ErrorCount: int64(raw.ErrorCount), RetransmissionCount: int64(raw.Retransmits),
-		RTTMs: float64(raw.RTTUS) / 1000, FirstSeen: now, LastSeen: now,
+		RTTMs: float64(raw.RTTUS) / 1000, AppDelayMs: float64(raw.AppDelayUS) / 1000,
+		HTTPStatus: int(raw.HTTPStatus), FirstSeen: now, LastSeen: now,
 	}
 	if c.ifaceName != "" {
 		event.Interface = c.ifaceName

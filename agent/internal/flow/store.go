@@ -2,6 +2,7 @@ package flow
 
 import (
 	"github.com/vmlens/vmlens/agent/internal/features/classification"
+	"github.com/vmlens/vmlens/agent/internal/features/protocols/application/http"
 	"github.com/vmlens/vmlens/agent/internal/features/protocols/transport/tcp/connection"
 	"github.com/vmlens/vmlens/agent/internal/features/protocols/transport/tcp/retrans"
 	"github.com/vmlens/vmlens/agent/internal/features/protocols/transport/tcp/rtt"
@@ -75,6 +76,7 @@ func (s *State) Apply(event pipeline.FlowMetric) {
 	rtt.Apply(&s.TCP.RTT, event.RTTMs)
 	retrans.Apply(&s.TCP.Retrans, uint64(nonNegative(event.RetransmissionCount)))
 	applyAppDelay(&s.Application, event.AppDelayMs)
+	http.ApplyStatus(&s.Application.HTTPStatus, event.HTTPStatus)
 	s.Classification = classification.Model{
 		Network:     networkFromIP(event.SrcIP),
 		Transport:   event.Protocol,
@@ -105,6 +107,7 @@ func (s *State) Merge(next State) {
 	mergeRTT(&s.TCP.RTT, next.TCP.RTT)
 	s.TCP.Retrans.Count += next.TCP.Retrans.Count
 	mergeAppDelay(&s.Application, next.Application)
+	http.MergeStatus(&s.Application.HTTPStatus, next.Application.HTTPStatus)
 	if next.Classification != (classification.Model{}) {
 		s.Classification = next.Classification
 	}

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/vmlens/vmlens/agent/internal/features/classification"
+	"github.com/vmlens/vmlens/agent/internal/features/protocols/application/http"
 	"github.com/vmlens/vmlens/agent/internal/features/protocols/transport/tcp/connection"
 	"github.com/vmlens/vmlens/agent/internal/features/protocols/transport/tcp/retrans"
 	"github.com/vmlens/vmlens/agent/internal/features/protocols/transport/tcp/rtt"
@@ -38,4 +39,5 @@ type TCPState struct {
 type ApplicationState struct {
 	AvgDelayMs float64
 	Samples    uint64
+	HTTPStatus http.StatusCounters
 }

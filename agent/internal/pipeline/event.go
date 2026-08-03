@@ -36,6 +36,10 @@ type FlowMetric struct {
 	RTTMs      float64
 	AppDelayMs float64
 
+	// HTTPStatus is the response status derived in-kernel from a plaintext
+	// HTTP/1.x status line, or 0 when the packet carried no status line.
+	HTTPStatus int
+
 	FirstSeen time.Time
 	LastSeen  time.Time
 }
