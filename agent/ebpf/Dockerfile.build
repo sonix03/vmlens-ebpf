@@ -1,0 +1,23 @@
+# Toolchain for building flow_tracker.bpf.o without installing clang on the host.
+#
+# Build once:
+#   docker build -t vmlens-bpf-build -f agent/ebpf/Dockerfile.build .
+#
+# Then compile in about a second:
+#   docker run --rm -v "$PWD":/src -w /src vmlens-bpf-build \
+#     clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -I /vmlinux \
+#       -c agent/internal/features/traffic/packet/flow_tracker.bpf.c \
+#       -o dist/agent/<version>/flow_tracker-linux-amd64.bpf.o
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends clang libbpf-dev llvm \
+    && rm -rf /var/lib/apt/lists/*
+
+# The fallback header ships in the repo, so a build does not depend on the
+# host kernel exposing BTF.
+COPY agent/ebpf/include/vmlinux_fallback.h /vmlinux/vmlinux.h
+
+WORKDIR /src

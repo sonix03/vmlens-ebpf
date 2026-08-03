@@ -111,6 +111,27 @@ npm --prefix frontend run dev
 Local stack: dashboard `:3000`, API `:8080`, Postgres `:5432`. Compose services
 are named `dashboard`, `control-plane`, `datastore`.
 
+### Building the eBPF object
+
+`scripts/build-agent-release.sh` builds the agent binary and `flow_tracker.bpf.o`
+together, but it needs clang with the bpf target plus `libbpf-dev` on the host.
+When those are missing, use the pinned toolchain image instead of installing
+them — build it once, then each compile is a container start rather than an
+`apt-get install`:
+
+```bash
+docker build -t vmlens-bpf-build -f agent/ebpf/Dockerfile.build .
+docker run --rm -v "$PWD":/src -w /src vmlens-bpf-build \
+  clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -I /vmlinux \
+    -c agent/internal/features/traffic/packet/flow_tracker.bpf.c \
+    -o dist/agent/<version>/flow_tracker-linux-amd64.bpf.o
+```
+
+The image carries `vmlinux_fallback.h`, so the build does not depend on the host
+kernel exposing BTF. A clean compile proves the C is valid and the programs and
+maps are present; it does not prove the **verifier** will accept the program.
+That is only settled when the agent loads it on the target kernel.
+
 **Node version**: the Vite 5 build needs Node 20+. On Node 18 it dies with a
 `SyntaxError` inside Vite's own dist chunks, which looks like a code error but is
 not. Check `node --version` first.
@@ -156,8 +177,7 @@ Environment quirks worth knowing before you diagnose a "connectivity problem":
   newer expanded sections appended below. Later rules win by cascade order; add
   new blocks at the end rather than editing the compressed lines.
 - eBPF C lives next to the Go feature that owns it and compiles into one object,
-  `flow_tracker.bpf.o`. Rebuilding it needs clang/bpftool, which are not always
-  present — check before assuming you can rebuild.
+  `flow_tracker.bpf.o`.
 - Prebuilt agents in `dist/agent/<tag>/` may lag the source tree. Verify what a
   deployed binary actually contains (`strings … | grep trace_tcp_rtt`) before
   concluding a metric is broken; the feature may simply not be deployed.
