@@ -1392,3 +1392,42 @@ footer {
    signal itself, not decoration: hiding them removes the only indication of
    direction and liveliness. The preference is honoured by slowing and thinning
    the stream instead, in EdgeParticles. */
+
+.graph-edge-group {
+  transition: opacity .2s ease;
+}
+
+.graph-edge-muted {
+  opacity: .13;
+}
+
+/* The edge path carries an inline strokeWidth, so the focus width has to win
+   over it explicitly. */
+.graph-edge-focus .graph-edge {
+  stroke-width: 2.8px !important;
+  opacity: 1 !important;
+}
+
+.graph-edge-focus .graph-particle {
+  r: 3.6;
+}
+
+text.graph-edge-muted {
+  opacity: .12;
+}
+
+.graph-node-button {
+  transition: opacity .2s ease, border-color .15s ease, background-color .15s ease, transform .15s ease;
+}
+
+.graph-node-button.vm-node-muted {
+  opacity: .22;
+}
+
+.graph-node-button.vm-node-selected {
+  border-color: hsl(var(--orbit-primary));
+  box-shadow:
+    0 0 0 1px hsl(var(--orbit-primary) / .5),
+    0 0 26px hsl(var(--orbit-primary) / .35),
+    0 10px 26px #0006;
+}

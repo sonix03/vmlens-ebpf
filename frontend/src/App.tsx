@@ -434,7 +434,7 @@ export function App() {
         <div className="graph-heading graph-heading-compact">
           <div className="legend"><span className="vm-dot">Virtual machine</span><span className="edge-line idle-line">Stable RTT</span><span className="edge-line slow-line">Slow RTT</span><span className="edge-line active-line">Request traffic</span><span className="edge-line failed-line">Port refused</span></div>
         </div>
-        <GraphView graph={displayGraph} onNodeSelect={handleNodeSelect} onConnectionSelect={handleConnectionSelect} />
+        <GraphView graph={displayGraph} onNodeSelect={handleNodeSelect} onConnectionSelect={handleConnectionSelect} selectedNodeID={selectedNode?.id} />
       </div>
       {selectedNode && <NodeDetailsPanel node={selectedNode} graph={graph} onClose={() => setSelectedNode(undefined)} />}
       {selectedConnection && <EdgeDetailsPanel connection={selectedConnection} onClose={() => setSelectedConnection(undefined)} />}

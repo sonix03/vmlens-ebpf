@@ -11,6 +11,7 @@ interface Props {
   graph: GraphData
   onNodeSelect: (node: GraphNode) => void
   onConnectionSelect: (connection: ConnectionSummary) => void
+  selectedNodeID?: string
 }
 
 const statusColors: Record<string, string> = {
@@ -314,7 +315,7 @@ function EdgeParticles({ pathID, edge, calm }: { pathID: string; edge: ParticleE
   </>
 }
 
-export function GraphView({ graph, onNodeSelect, onConnectionSelect }: Props) {
+export function GraphView({ graph, onNodeSelect, onConnectionSelect, selectedNodeID }: Props) {
   const [clock, setClock] = useState(() => Date.now())
   const calmMotion = useReducedMotion()
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 })
@@ -610,6 +611,24 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect }: Props) {
     })
   }, [clock, graph.edges, nodeByID, nodeIDs])
 
+  // Selecting a node lights its own paths and mutes everything else, so the
+  // relationship stands out without losing the surrounding topology.
+  const focus = useMemo(() => {
+    if (!selectedNodeID) return undefined
+    const neighbours = new Set<string>([selectedNodeID])
+    edges.forEach((edge) => {
+      if (edge.connection.source === selectedNodeID) neighbours.add(edge.connection.target)
+      else if (edge.connection.target === selectedNodeID) neighbours.add(edge.connection.source)
+    })
+    return { id: selectedNodeID, neighbours }
+  }, [edges, selectedNodeID])
+
+  function edgeFocusClass(edge: { connection: ConnectionSummary }) {
+    if (!focus) return ''
+    const touchesFocus = edge.connection.source === focus.id || edge.connection.target === focus.id
+    return touchesFocus ? ' graph-edge-focus' : ' graph-edge-muted'
+  }
+
   const canvas = useMemo(() => {
     const maxX = Math.max(...nodes.map((item) => item.position.x + nodeWidth + canvasPadding), minCanvasWidth)
     const maxY = Math.max(...nodes.map((item) => item.position.y + nodeHeight + canvasPadding), minCanvasHeight)
@@ -684,7 +703,7 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect }: Props) {
             if (edge.fresh) classNames.push('graph-edge-pulse')
           }
           const pathID = `edge-path-${edge.id.replace(/[^A-Za-z0-9_-]/g, '_')}`
-          return <g key={edge.id} className="graph-edge-group">
+          return <g key={edge.id} className={`graph-edge-group${edgeFocusClass(edge)}`}>
             <path
               id={pathID}
               className={classNames.join(' ')}
@@ -708,7 +727,7 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect }: Props) {
         })}
         {edges.map((edge) => edge.connected && edge.label ? <text
           key={`${edge.id}-label`}
-          className="graph-edge-label"
+          className={`graph-edge-label${edgeFocusClass(edge)}`}
           x={edge.labelX}
           y={edge.labelY}
           textAnchor="middle"
@@ -718,7 +737,7 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect }: Props) {
         key={node.id}
         type="button"
         data-testid={`node-${node.id}`}
-        className={`graph-node-button vm-node-${status}`}
+        className={`graph-node-button vm-node-${status}${focus ? (focus.id === node.id ? ' vm-node-selected' : focus.neighbours.has(node.id) ? '' : ' vm-node-muted') : ''}`}
         title={`${node.label} · ${node.ip || 'no IP'} · ${status}`}
         style={{ left: position.x, top: position.y, borderColor: node.status === 'online' ? color : `${color}80` }}
         onClick={() => onNodeSelect(node)}
