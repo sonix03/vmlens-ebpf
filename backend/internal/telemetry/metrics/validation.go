@@ -41,6 +41,14 @@ func ValidateFlowEvent(event *model.FlowEvent) error {
 	if event.AvgRTTMs < 0 || event.AvgAppDelayMs < 0 {
 		return fmt.Errorf("flow latency metrics cannot be negative")
 	}
+	if event.HTTP1xx < 0 || event.HTTP2xx < 0 || event.HTTP3xx < 0 || event.HTTP4xx < 0 || event.HTTP5xx < 0 {
+		return fmt.Errorf("http status counters cannot be negative")
+	}
+	// 0 means the agent saw no status line, which is the common case: every
+	// non-HTTP flow and every TLS flow reports it.
+	if event.LastHTTPStatus != 0 && (event.LastHTTPStatus < 100 || event.LastHTTPStatus > 599) {
+		return fmt.Errorf("last_http_status must be between 100 and 599")
+	}
 	now := time.Now().UTC()
 	if event.FirstSeen.IsZero() {
 		event.FirstSeen = now

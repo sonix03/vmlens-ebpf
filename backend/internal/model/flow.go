@@ -19,6 +19,12 @@ type FlowEvent struct {
 	Retransmissions int64     `json:"retransmission_count"`
 	AvgRTTMs        float64   `json:"avg_rtt_ms"`
 	AvgAppDelayMs   float64   `json:"avg_app_delay_ms"`
+	HTTP1xx         int64     `json:"http_1xx_count"`
+	HTTP2xx         int64     `json:"http_2xx_count"`
+	HTTP3xx         int64     `json:"http_3xx_count"`
+	HTTP4xx         int64     `json:"http_4xx_count"`
+	HTTP5xx         int64     `json:"http_5xx_count"`
+	LastHTTPStatus  int       `json:"last_http_status"`
 	FirstSeen       time.Time `json:"first_seen"`
 	LastSeen        time.Time `json:"last_seen"`
 	Interface       string    `json:"interface"`
@@ -47,6 +53,12 @@ type Flow struct {
 	Retransmissions   int64      `json:"retransmission_count"`
 	AvgRTTMs          float64    `json:"avg_rtt_ms"`
 	AvgAppDelayMs     float64    `json:"avg_app_delay_ms"`
+	HTTP1xx           int64      `json:"http_1xx_count"`
+	HTTP2xx           int64      `json:"http_2xx_count"`
+	HTTP3xx           int64      `json:"http_3xx_count"`
+	HTTP4xx           int64      `json:"http_4xx_count"`
+	HTTP5xx           int64      `json:"http_5xx_count"`
+	LastHTTPStatus    int        `json:"last_http_status,omitempty"`
 	RequestsPerSec    float64    `json:"requests_per_second"`
 	ConnectionsPerSec float64    `json:"connections_per_second"`
 	FirstSeen         time.Time  `json:"first_seen"`

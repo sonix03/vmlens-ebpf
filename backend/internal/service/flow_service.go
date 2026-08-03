@@ -102,13 +102,16 @@ func (s *FlowService) Ingest(ctx context.Context, event model.FlowEvent) (model.
 				agent_id, src_vm_id, dst_vm_id, src_ip, dst_ip, src_port, dst_port,
 				protocol, direction, scope, bytes_sent, bytes_received, packets, connection_count,
 				request_count, error_count, retransmission_count, avg_rtt_ms, avg_app_delay_ms,
-				first_seen, last_seen, last_error_at, interface_name
-			) VALUES ($1, $2, $3, $4::inet, $5::inet, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+				first_seen, last_seen, last_error_at, interface_name,
+				http_1xx_count, http_2xx_count, http_3xx_count, http_4xx_count, http_5xx_count, last_http_status
+			) VALUES ($1, $2, $3, $4::inet, $5::inet, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
 			RETURNING id::text`, event.AgentID, source.ID, destinationID, event.SrcIP, event.DstIP,
 			event.SrcPort, event.DstPort, event.Protocol, event.Direction, scope, event.BytesSent, event.BytesReceived,
 			event.Packets, event.ConnectionCount, event.RequestCount, event.ErrorCount, event.Retransmissions, event.AvgRTTMs, event.AvgAppDelayMs,
 			event.FirstSeen, event.LastSeen,
-			flowmetrics.LastErrorAtArg(event.ErrorCount, observedAt), nullIfEmpty(event.Interface)).Scan(&flowID)
+			flowmetrics.LastErrorAtArg(event.ErrorCount, observedAt), nullIfEmpty(event.Interface),
+			event.HTTP1xx, event.HTTP2xx, event.HTTP3xx, event.HTTP4xx, event.HTTP5xx,
+			nullIfZeroStatus(event.LastHTTPStatus)).Scan(&flowID)
 	} else {
 		_, err = tx.Exec(ctx, `
 			UPDATE network_flows SET
@@ -137,10 +140,18 @@ func (s *FlowService) Ingest(ctx context.Context, event model.FlowEvent) (model.
 					WHEN $7 > 0 THEN GREATEST(COALESCE(last_error_at, $15), $15)
 					ELSE last_error_at
 				END,
-				observed_at = $15
+				observed_at = $15,
+				http_1xx_count = http_1xx_count + $16,
+				http_2xx_count = http_2xx_count + $17,
+				http_3xx_count = http_3xx_count + $18,
+				http_4xx_count = http_4xx_count + $19,
+				http_5xx_count = http_5xx_count + $20,
+				last_http_status = COALESCE($21, last_http_status)
 			WHERE id = $1::uuid`, flowID, event.BytesSent, event.BytesReceived, event.Packets,
 			event.ConnectionCount, event.RequestCount, event.ErrorCount, event.Retransmissions, event.AvgRTTMs, event.AvgAppDelayMs,
-			event.FirstSeen, event.LastSeen, event.AgentID, nullIfEmpty(event.Interface), observedAt)
+			event.FirstSeen, event.LastSeen, event.AgentID, nullIfEmpty(event.Interface), observedAt,
+			event.HTTP1xx, event.HTTP2xx, event.HTTP3xx, event.HTTP4xx, event.HTTP5xx,
+			nullIfZeroStatus(event.LastHTTPStatus))
 	}
 	if err != nil {
 		return model.Flow{}, fmt.Errorf("aggregate flow: %w", err)
@@ -150,13 +161,16 @@ func (s *FlowService) Ingest(ctx context.Context, event model.FlowEvent) (model.
 			flow_id, agent_id, src_vm_id, dst_vm_id, src_ip, dst_ip, src_port, dst_port,
 			protocol, direction, scope, bytes_sent, bytes_received, packets, connection_count,
 			request_count, error_count, retransmission_count, avg_rtt_ms, avg_app_delay_ms,
-			first_seen, last_seen, observed_at
-		) VALUES ($1::uuid, $2, $3, $4, $5::inet, $6::inet, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
+			first_seen, last_seen, observed_at,
+			http_1xx_count, http_2xx_count, http_3xx_count, http_4xx_count, http_5xx_count, last_http_status
+		) VALUES ($1::uuid, $2, $3, $4, $5::inet, $6::inet, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)`,
 		flowID, event.AgentID, source.ID, destinationID, event.SrcIP, event.DstIP,
 		event.SrcPort, event.DstPort, event.Protocol, event.Direction, scope,
 		event.BytesSent, event.BytesReceived, event.Packets, event.ConnectionCount,
 		event.RequestCount, event.ErrorCount, event.Retransmissions, event.AvgRTTMs, event.AvgAppDelayMs,
-		event.FirstSeen, event.LastSeen, observedAt); err != nil {
+		event.FirstSeen, event.LastSeen, observedAt,
+		event.HTTP1xx, event.HTTP2xx, event.HTTP3xx, event.HTTP4xx, event.HTTP5xx,
+		nullIfZeroStatus(event.LastHTTPStatus)); err != nil {
 		return model.Flow{}, fmt.Errorf("record flow observation: %w", err)
 	}
 
@@ -178,6 +192,8 @@ func (s *FlowService) Ingest(ctx context.Context, event model.FlowEvent) (model.
 		BytesReceived: event.BytesReceived, Packets: event.Packets,
 		ConnectionCount: event.ConnectionCount, RequestCount: event.RequestCount, ErrorCount: event.ErrorCount,
 		Retransmissions: event.Retransmissions, AvgRTTMs: event.AvgRTTMs, AvgAppDelayMs: event.AvgAppDelayMs,
+		HTTP1xx: event.HTTP1xx, HTTP2xx: event.HTTP2xx, HTTP3xx: event.HTTP3xx,
+		HTTP4xx: event.HTTP4xx, HTTP5xx: event.HTTP5xx, LastHTTPStatus: event.LastHTTPStatus,
 		RequestsPerSec:    flowmetrics.RatePerSecond(event.RequestCount, event.FirstSeen, event.LastSeen),
 		ConnectionsPerSec: flowmetrics.RatePerSecond(event.ConnectionCount, event.FirstSeen, event.LastSeen),
 		FirstSeen:         event.FirstSeen,
@@ -199,7 +215,9 @@ func (s *FlowService) List(ctx context.Context, limit int) ([]model.Flow, error)
 		       host(src_ip), host(dst_ip), COALESCE(src_port, 0), COALESCE(dst_port, 0),
 		       protocol, direction, scope, bytes_sent, bytes_received, packets, connection_count,
 		       request_count, error_count, retransmission_count, avg_rtt_ms, avg_app_delay_ms,
-		       first_seen, last_seen, observed_at, last_error_at, COALESCE(interface_name, ''), created_at
+		       first_seen, last_seen, observed_at, last_error_at, COALESCE(interface_name, ''), created_at,
+		       http_1xx_count, http_2xx_count, http_3xx_count, http_4xx_count, http_5xx_count,
+		       COALESCE(last_http_status, 0)
 		FROM network_flows ORDER BY observed_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -213,7 +231,9 @@ func (s *FlowService) List(ctx context.Context, limit int) ([]model.Flow, error)
 			&flow.SrcPort, &flow.DstPort, &flow.Protocol, &flow.Direction, &flow.Scope, &flow.BytesSent, &flow.BytesReceived,
 			&flow.Packets, &flow.ConnectionCount, &flow.RequestCount, &flow.ErrorCount, &flow.Retransmissions,
 			&flow.AvgRTTMs, &flow.AvgAppDelayMs, &flow.FirstSeen, &flow.LastSeen,
-			&flow.ObservedAt, &lastErrorAt, &flow.InterfaceName, &flow.CreatedAt); err != nil {
+			&flow.ObservedAt, &lastErrorAt, &flow.InterfaceName, &flow.CreatedAt,
+			&flow.HTTP1xx, &flow.HTTP2xx, &flow.HTTP3xx, &flow.HTTP4xx, &flow.HTTP5xx,
+			&flow.LastHTTPStatus); err != nil {
 			return nil, err
 		}
 		if lastErrorAt.Valid {

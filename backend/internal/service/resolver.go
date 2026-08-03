@@ -42,3 +42,12 @@ func nullIfEmpty(value string) any {
 	}
 	return value
 }
+
+// nullIfZeroStatus keeps "no status line was seen" out of last_http_status, so
+// the column means "the last code we actually observed" rather than 0.
+func nullIfZeroStatus(status int) any {
+	if status < 100 || status > 599 {
+		return nil
+	}
+	return status
+}

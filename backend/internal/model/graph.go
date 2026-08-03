@@ -46,6 +46,10 @@ type GraphEdge struct {
 	Reachable       bool       `json:"reachable,omitempty"`
 	AvgRTTMs        float64    `json:"avg_rtt_ms,omitempty"`
 	AvgAppDelayMs   float64    `json:"avg_app_delay_ms,omitempty"`
+	HTTP2xx         int64      `json:"http_2xx_count,omitempty"`
+	HTTP4xx         int64      `json:"http_4xx_count,omitempty"`
+	HTTP5xx         int64      `json:"http_5xx_count,omitempty"`
+	LastHTTPStatus  int        `json:"last_http_status,omitempty"`
 }
 
 type GraphFilter struct {
