@@ -252,8 +252,71 @@ function connectionRecommendation(connection: Pick<ConnectionSummary, 'health' |
   return 'No recent observed connectivity. Run a reachability probe or application request before treating this connection as working.'
 }
 
+type ParticleEdge = {
+  failed: boolean
+  slow: boolean
+  activeForward: boolean
+  activeReverse: boolean
+}
+
+function useReducedMotion() {
+  const [reduced, setReduced] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const update = () => setReduced(query.matches)
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+
+  return reduced
+}
+
+// Dots mean request traffic is in flight right now, and they only run on the
+// direction that traffic actually took. A path that is merely connected shows
+// its line and nothing else, so motion on the map always means a live request.
+function EdgeParticles({ pathID, edge, calm }: { pathID: string; edge: ParticleEdge; calm: boolean }) {
+  if (edge.failed) return null
+  const directions: Array<'forward' | 'reverse'> = []
+  if (edge.activeForward) directions.push('forward')
+  if (edge.activeReverse) directions.push('reverse')
+  if (directions.length === 0) return null
+
+  // Under prefers-reduced-motion the stream is slowed and thinned rather than
+  // removed, so the direction stays readable.
+  const duration = 2.2 * (calm ? 2.6 : 1)
+  const count = calm ? 3 : 6
+  const radius = 3
+  const tone = edge.slow ? 'slow' : 'active'
+
+  return <>
+    {directions.flatMap((direction) => Array.from({ length: count }, (_, index) => {
+      const offset = -(duration / count) * index
+      return <circle
+        key={`${pathID}-${direction}-${index}`}
+        r={radius}
+        className={`graph-particle graph-particle-${tone}`}
+      >
+        <animateMotion
+          dur={`${duration}s`}
+          begin={`${offset}s`}
+          repeatCount="indefinite"
+          calcMode="linear"
+          keyPoints={direction === 'forward' ? '0;1' : '1;0'}
+          keyTimes="0;1"
+        >
+          {/* xlink:href as well: Safari only gained plain href on mpath late. */}
+          <mpath href={`#${pathID}`} xlinkHref={`#${pathID}`} />
+        </animateMotion>
+      </circle>
+    }))}
+  </>
+}
+
 export function GraphView({ graph, onNodeSelect, onConnectionSelect }: Props) {
   const [clock, setClock] = useState(() => Date.now())
+  const calmMotion = useReducedMotion()
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 })
   const [panning, setPanning] = useState(false)
   const canvasRef = useRef<HTMLDivElement>(null)
@@ -620,22 +683,28 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect }: Props) {
             classNames.push('graph-edge-connection', edge.slow ? 'graph-edge-slow' : 'graph-edge-idle')
             if (edge.fresh) classNames.push('graph-edge-pulse')
           }
-          return <path
-            key={edge.id}
-            className={classNames.join(' ')}
-            d={edge.path}
-            onClick={(event) => {
-              event.stopPropagation()
-              onConnectionSelect(edge.connection)
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-            markerStart={showStartMarker ? `url(#${markerID})` : undefined}
-            markerEnd={showEndMarker ? `url(#${markerID})` : undefined}
-            style={{
-              strokeWidth: edge.failed ? Math.max(edge.width, 2.2) : edge.active ? edge.width : 1.45,
-              opacity: edge.failed ? 0.98 : edge.active ? 0.95 : 0.74,
-            }}
-          />
+          const pathID = `edge-path-${edge.id.replace(/[^A-Za-z0-9_-]/g, '_')}`
+          return <g key={edge.id} className="graph-edge-group">
+            <path
+              id={pathID}
+              className={classNames.join(' ')}
+              d={edge.path}
+              onClick={(event) => {
+                event.stopPropagation()
+                onConnectionSelect(edge.connection)
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              markerStart={showStartMarker ? `url(#${markerID})` : undefined}
+              markerEnd={showEndMarker ? `url(#${markerID})` : undefined}
+              style={{
+                // The dots carry motion and activity now, so the line itself
+                // stays thin and quiet and only failure is allowed to shout.
+                strokeWidth: edge.failed ? Math.max(edge.width, 2.2) : Math.min(edge.width, 1.8),
+                opacity: 1,
+              }}
+            />
+            <EdgeParticles pathID={pathID} edge={edge} calm={calmMotion} />
+          </g>
         })}
         {edges.map((edge) => edge.connected && edge.label ? <text
           key={`${edge.id}-label`}

@@ -1315,3 +1315,80 @@ footer {
   height: 96px;
   border-right: 0 !important;
 }
+
+/* ---------------------------------------------------------------------------
+   Orbit motion. Dots ride the edge path via SVG animateMotion, one stream per
+   direction that carries a live request. The old marching dash pattern is gone:
+   two dashed streams crossing on one line read as noise rather than as two
+   directions, so the line becomes a quiet rail and the dots carry the movement.
+   --------------------------------------------------------------------------- */
+
+.graph-edge {
+  stroke-dasharray: none !important;
+}
+
+.graph-edge-connection,
+.graph-edge-active,
+.graph-edge-reachability,
+.graph-edge-reverse,
+.graph-edge-bidirectional {
+  animation: none;
+}
+
+/* With the dots reserved for live requests, this line is the only thing saying
+   "a connection exists here", so it has to stay legible on its own. */
+.graph-edge-connection,
+.graph-edge-idle {
+  stroke: #38805a;
+  filter: none;
+}
+
+.graph-edge-active {
+  stroke: #3d8f61;
+  filter: none;
+}
+
+.graph-edge-slow,
+.graph-edge-active-slow {
+  stroke: #6d5527;
+  filter: none;
+}
+
+.graph-edge-reachability {
+  stroke: #2f5771;
+  filter: none;
+}
+
+/* Failure is the one state still allowed to be loud. */
+.graph-edge-failed {
+  stroke: #e15757;
+  filter: drop-shadow(0 0 8px #e1575799);
+}
+
+/* Keep the arrival flash; it marks a newly seen path rather than motion. */
+.graph-edge.graph-edge-pulse {
+  animation: graph-edge-pulse .9s ease-out;
+}
+
+.graph-edge-slow.graph-edge-pulse {
+  animation-name: graph-edge-slow-pulse;
+}
+
+.graph-particle {
+  pointer-events: none;
+}
+
+.graph-particle-active {
+  fill: #d8ffe8;
+  filter: drop-shadow(0 0 8px #93e8ae);
+}
+
+.graph-particle-slow {
+  fill: #ffe39a;
+  filter: drop-shadow(0 0 7px #d9ad55);
+}
+
+/* No blanket suppression under prefers-reduced-motion. These dots are the
+   signal itself, not decoration: hiding them removes the only indication of
+   direction and liveliness. The preference is honoured by slowing and thinning
+   the stream instead, in EdgeParticles. */
