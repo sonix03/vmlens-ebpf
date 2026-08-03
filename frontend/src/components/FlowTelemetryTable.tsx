@@ -31,6 +31,15 @@ function metric(label: string, value: string) {
   return <span><strong>{value}</strong><small>{label}</small></span>
 }
 
+// dst_port is the peer port, which on a server-side flow is an ephemeral client
+// port. service_port is the side the backend resolved as the actual service.
+function serviceCell(flow: Flow) {
+  if (!flow.service) return <span className="service-unknown">—</span>
+  return <>
+    <span className="service-pill">{flow.service}</span>
+    {flow.service_port ? <small className="service-port">:{flow.service_port}</small> : null}
+  </>
+}
 
 function numberValue(value?: number) {
   return (value ?? 0).toLocaleString()
@@ -77,7 +86,7 @@ function tableGuide(mode: FlowTableMode) {
     case 'l4':
       return [
         ['Source', 'Raw aggregate from network_flows, not external telemetry.'],
-        ['Use for', 'Ports, bytes, packets, connections, request attempts, and error counters.'],
+        ['Port rule', 'Source is always this VM, destination is always the peer. On inbound flows the listening port sits on the source side, so read the Service column.'],
         ['Noise control', 'Tunnel/probe/control ports are excluded from the main graph by config.'],
       ] as const
   }
@@ -223,7 +232,7 @@ export function FlowTelemetryTable({
       <table className="activity-table telemetry-table telemetry-metrics-table">
         <thead>
           <tr className="column-groups">
-            <th colSpan={5}>Flow identity</th>
+            <th colSpan={6}>Flow identity</th>
             <th colSpan={3}>Traffic</th>
             <th colSpan={3}>Attempts</th>
             <th colSpan={3}>Path quality</th>
@@ -235,6 +244,7 @@ export function FlowTelemetryTable({
             <th>Source</th>
             <th>Destination</th>
             <th>Protocol</th>
+            <th>Service</th>
             <th className="numeric">Sent</th>
             <th className="numeric">Received</th>
             <th className="numeric">Packets</th>
@@ -260,6 +270,7 @@ export function FlowTelemetryTable({
               <td>{endpoint('source', item.src_ip, `port ${item.src_port || '—'}`)}</td>
               <td>{endpoint('destination', item.dst_ip, `port ${item.dst_port || '—'}`)}</td>
               <td><span className="protocol-pill">{item.protocol || 'L4'}</span><small className="direction-label">{item.direction} · {item.scope}</small></td>
+              <td>{serviceCell(item)}</td>
               <td className={metricClass(item.bytes_sent)}>{formatBytes(item.bytes_sent)}</td>
               <td className={metricClass(item.bytes_received)}>{formatBytes(item.bytes_received)}</td>
               <td className={metricClass(item.packets)}>{numberValue(item.packets)}</td>
@@ -275,7 +286,7 @@ export function FlowTelemetryTable({
               </div></td>
             </tr>
           })}
-          {rows.length === 0 && <tr><td colSpan={15} className="activity-empty">Waiting for TC/eBPF {mode} telemetry…</td></tr>}
+          {rows.length === 0 && <tr><td colSpan={16} className="activity-empty">Waiting for TC/eBPF {mode} telemetry…</td></tr>}
         </tbody>
       </table>
     </div>

@@ -1330,14 +1330,18 @@ footer {
   gap: 3px;
 }
 
+.service-unknown {
+  color: hsl(0 0% 42%);
+  font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 .telemetry-metrics-table {
-  min-width: 1520px;
+  min-width: 1620px;
 }
 
 .telemetry-metrics-table .activity-endpoint {
   min-width: 128px;
 }
-
 
 .activity-empty {
   height: 96px;
