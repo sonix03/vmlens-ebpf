@@ -27,6 +27,25 @@ function activityTime(value: string) {
   return formatUTCClock(value)
 }
 
+const ephemeralPortMin = 32768
+
+// service_port is the server side. The client side is whichever of the two
+// observed ports it is not.
+function clientPort(item: InternalActivity) {
+  return item.service_port === item.local_port ? item.peer_port : item.local_port
+}
+
+// An ephemeral service_port means the backend had no known service to anchor
+// on, so the client/server split is inferred rather than observed.
+function portResolved(item: InternalActivity) {
+  return item.service_port > 0 && item.service_port < ephemeralPortMin
+}
+
+function portBox(value: number, resolved: boolean) {
+  if (!value) return <span className="port-box port-box-empty">—</span>
+  return <span className={`port-box${resolved ? '' : ' port-box-guess'}`} title={resolved ? undefined : 'Both ends are ephemeral; the client/server split is inferred, not observed.'}>{value}</span>
+}
+
 function rowKey(item: InternalActivity) {
   return `${item.id}:${item.direction}:${item.observed_at}`
 }
@@ -122,7 +141,7 @@ export function InternalActivityTable({
       <table className="activity-table">
         <thead>
           <tr className="column-groups">
-            <th colSpan={4}>Connection</th>
+            <th colSpan={6}>Connection</th>
             <th colSpan={3}>Performance</th>
             <th>Evidence</th>
           </tr>
@@ -130,6 +149,8 @@ export function InternalActivityTable({
             <th>Observed UTC</th>
             <th>Client → Server</th>
             <th>Service</th>
+            <th className="numeric">Client port</th>
+            <th className="numeric">Server port</th>
             <th>Observer side</th>
             <th>RTT (ms)</th>
             <th>Bytes</th>
@@ -148,7 +169,9 @@ export function InternalActivityTable({
               <span className={`activity-arrow ${item.direction}`} aria-label={item.direction}>→</span>
               {endpoint('server', item.destination_name, item.destination_ip)}
             </div></td>
-            <td><span className="service-pill">{item.service}</span><small className="service-port">:{item.service_port}</small></td>
+            <td><span className="service-pill">{item.service}</span></td>
+            <td className="port-cell">{portBox(clientPort(item), portResolved(item))}</td>
+            <td className="port-cell">{portBox(item.service_port, portResolved(item))}</td>
             <td><span className="protocol-pill">{item.protocol}</span><small className="direction-label">agent {item.direction}</small></td>
             <td><div className="metric-stack compact">
               <span className={`rtt-value${rtt >= slowRTTThresholdMs ? ' rtt-slow' : ''}`}><strong>{rtt > 0 ? rtt.toFixed(2) : '—'}</strong><small>threshold {slowRTTThresholdMs} ms</small></span>
@@ -166,7 +189,7 @@ export function InternalActivityTable({
             <td>{endpoint('observer', item.observer_name, item.observer_ip)}</td>
           </tr>
           })}
-          {activity.length === 0 && <tr><td colSpan={8} className="activity-empty">Waiting for internal VM activity…</td></tr>}
+          {activity.length === 0 && <tr><td colSpan={10} className="activity-empty">Waiting for internal VM activity…</td></tr>}
         </tbody>
       </table>
     </div>

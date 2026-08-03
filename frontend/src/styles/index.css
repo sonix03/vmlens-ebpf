@@ -1330,17 +1330,53 @@ footer {
   gap: 3px;
 }
 
-.service-unknown {
+/* Client and server ports get their own boxed cell instead of being buried in
+   the endpoint block, because which side holds the service depends on the
+   flow's direction. */
+
+.port-cell {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.port-box {
+  display: inline-block;
+  min-width: 58px;
+  padding: 4px 8px;
+  border: 1px solid hsl(var(--grid-line) / .8);
+  border-radius: 6px;
+  color: hsl(var(--orbit-foreground));
+  background: hsl(var(--orbit-background) / .5);
+  font: 600 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.port-box-empty {
   color: hsl(0 0% 42%);
-  font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  border-style: dashed;
+  font-weight: 400;
+}
+
+/* Both ends ephemeral: the split is inferred, so it must not read as evidence. */
+.port-box-guess {
+  color: hsl(var(--orbit-warning));
+  border-color: hsl(var(--orbit-warning) / .45);
+  border-style: dashed;
+  background: hsl(var(--orbit-warning) / .08);
 }
 
 .telemetry-metrics-table {
-  min-width: 1620px;
+  min-width: 1780px;
 }
 
 .telemetry-metrics-table .activity-endpoint {
   min-width: 128px;
+}
+
+.service-unknown {
+  color: hsl(0 0% 42%);
+  font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .activity-empty {

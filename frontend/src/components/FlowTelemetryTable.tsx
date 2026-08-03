@@ -35,10 +35,23 @@ function metric(label: string, value: string) {
 // port. service_port is the side the backend resolved as the actual service.
 function serviceCell(flow: Flow) {
   if (!flow.service) return <span className="service-unknown">—</span>
-  return <>
-    <span className="service-pill">{flow.service}</span>
-    {flow.service_port ? <small className="service-port">:{flow.service_port}</small> : null}
-  </>
+  return <span className="service-pill">{flow.service}</span>
+}
+
+const ephemeralPortMin = 32768
+
+// The server side is whichever port the backend resolved as the service; the
+// client side is the other one. When the resolved port is itself ephemeral the
+// backend had no known service to anchor on, so the split is a guess.
+function portRoles(flow: Flow) {
+  const server = flow.service_port ?? 0
+  const client = server === flow.src_port ? flow.dst_port : flow.src_port
+  return { client, server, resolved: server > 0 && server < ephemeralPortMin }
+}
+
+function portBox(value: number, resolved = true) {
+  if (!value) return <span className="port-box port-box-empty">—</span>
+  return <span className={`port-box${resolved ? '' : ' port-box-guess'}`} title={resolved ? undefined : 'Both ends are ephemeral; the client/server split is inferred, not observed.'}>{value}</span>
 }
 
 function numberValue(value?: number) {
@@ -232,7 +245,7 @@ export function FlowTelemetryTable({
       <table className="activity-table telemetry-table telemetry-metrics-table">
         <thead>
           <tr className="column-groups">
-            <th colSpan={6}>Flow identity</th>
+            <th colSpan={8}>Flow identity</th>
             <th colSpan={3}>Traffic</th>
             <th colSpan={3}>Attempts</th>
             <th colSpan={3}>Path quality</th>
@@ -245,6 +258,8 @@ export function FlowTelemetryTable({
             <th>Destination</th>
             <th>Protocol</th>
             <th>Service</th>
+            <th className="numeric">Client port</th>
+            <th className="numeric">Server port</th>
             <th className="numeric">Sent</th>
             <th className="numeric">Received</th>
             <th className="numeric">Packets</th>
@@ -264,13 +279,16 @@ export function FlowTelemetryTable({
             const rowSeverity = severity(item, rtt, edge)
             const key = flowKey(item)
             const observedAt = item.observed_at || item.last_seen
+            const ports = portRoles(item)
             return <tr key={`${item.id}-${index}`} className={rowClassName(freshRows.has(key), rowSeverity)}>
               <td>{signalBadge(rowSeverity, signal(item, rowSeverity))}</td>
               <td className="activity-time">{formatUTCClock(observedAt)}</td>
-              <td>{endpoint('source', item.src_ip, `port ${item.src_port || '—'}`)}</td>
-              <td>{endpoint('destination', item.dst_ip, `port ${item.dst_port || '—'}`)}</td>
+              <td>{endpoint('source', item.src_ip, 'observing vm')}</td>
+              <td>{endpoint('destination', item.dst_ip, 'peer')}</td>
               <td><span className="protocol-pill">{item.protocol || 'L4'}</span><small className="direction-label">{item.direction} · {item.scope}</small></td>
               <td>{serviceCell(item)}</td>
+              <td className="port-cell">{portBox(ports.client, ports.resolved)}</td>
+              <td className="port-cell">{portBox(ports.server, ports.resolved)}</td>
               <td className={metricClass(item.bytes_sent)}>{formatBytes(item.bytes_sent)}</td>
               <td className={metricClass(item.bytes_received)}>{formatBytes(item.bytes_received)}</td>
               <td className={metricClass(item.packets)}>{numberValue(item.packets)}</td>
@@ -286,7 +304,7 @@ export function FlowTelemetryTable({
               </div></td>
             </tr>
           })}
-          {rows.length === 0 && <tr><td colSpan={16} className="activity-empty">Waiting for TC/eBPF {mode} telemetry…</td></tr>}
+          {rows.length === 0 && <tr><td colSpan={18} className="activity-empty">Waiting for TC/eBPF {mode} telemetry…</td></tr>}
         </tbody>
       </table>
     </div>
