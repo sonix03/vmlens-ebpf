@@ -18,7 +18,6 @@ import (
 
 	telemetry "github.com/vmlens/vmlens/agent/internal/exporter"
 	"github.com/vmlens/vmlens/agent/internal/features/classification"
-	tcpconnection "github.com/vmlens/vmlens/agent/internal/features/protocols/transport/tcp/connection"
 	"github.com/vmlens/vmlens/agent/internal/features/traffic/direction"
 	"github.com/vmlens/vmlens/agent/internal/pipeline"
 )
@@ -331,13 +330,14 @@ func (c *EBPFCollector) convert(raw rawFlowEvent) pipeline.FlowMetric {
 	flowDirection := direction.FromKernel(raw.Direction)
 	srcPort, dstPort := classification.NormalizePorts(protocol, int(raw.SrcPort), int(raw.DstPort))
 	now := time.Now().UTC()
+	// RequestCount stays unset here. The connection reducer owns the
+	// request-inference rule so it is applied in exactly one place.
 	event := pipeline.FlowMetric{
 		AgentID: c.registration.AgentID, SrcIP: sourceIP, DstIP: destinationIP,
 		SrcPort: srcPort, DstPort: dstPort, Protocol: protocol,
 		Direction: flowDirection, Source: rawEventSource(raw),
 		ByteCount: int64(raw.Bytes), PacketCount: int64(raw.Packets), ConnectionCount: int64(raw.Connections),
-		RequestCount: tcpconnection.InferRequestCount(protocol, flowDirection, int64(raw.Bytes), raw.Connections, raw.ErrorCount),
-		ErrorCount:   int64(raw.ErrorCount), RetransmissionCount: int64(raw.Retransmits),
+		ErrorCount: int64(raw.ErrorCount), RetransmissionCount: int64(raw.Retransmits),
 		RTTMs: float64(raw.RTTUS) / 1000, FirstSeen: now, LastSeen: now,
 	}
 	if c.ifaceName != "" {
