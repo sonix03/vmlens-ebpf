@@ -1,29 +1,224 @@
 # Metrics Contract
 
-This document defines the data VMLens collects from passive eBPF packet capture
-and TCP kernel probes.
+This document defines what VMLens measures, how each number is produced, and how
+a consumer is allowed to read it. It covers passive eBPF packet capture and TCP
+kernel probes. Active probing is defined in `probing.md`.
 
-## Passive eBPF flow metrics
+Read this document before building anything on top of `/api/flows`,
+`/api/graph`, or `/api/internal/activity`. The exact JSON field list lives in
+`telemetry-schema.md`.
 
-Passive tracking is the base signal. It observes traffic that already exists.
+## 1. The observer model
 
-| Metric | How it is tracked | Current status | Notes |
+This is the single most important rule in VMLens. Every flow record is written
+from the point of view of the VM that observed it.
+
+```text
+src_ip / src_port  = the observing VM (the VM running the agent)
+dst_ip / dst_port  = the peer on the other side
+direction          = which way the bytes moved on that VM's NIC
+```
+
+`src_ip` is **not** the IP in the packet's source field. The agent normalizes it
+before emitting the event:
+
+| Capture path | Where the normalization happens |
+| --- | --- |
+| TC ingress/egress | `features/traffic/packet/parser.bpf.h` → `fill_directional_tuple()` |
+| TCP/UDP kprobes | `features/protocols/transport/tcp/connection/socket_capture.bpf.h` → `socket_metadata()` |
+
+On an ingress packet the parser swaps the packet tuple so the local VM stays in
+the source position, then reports `direction = ingress` to say the bytes came
+in. This keeps one VM pair on one axis instead of producing mirrored rows.
+
+### What this means per role
+
+| Role of the observing VM | `src_port` holds | `dst_port` holds |
+| --- | --- | --- |
+| Client (it opened the connection) | Local ephemeral port | Peer **service** port, e.g. 443 |
+| Server (it accepted the connection) | Local **service** port, e.g. 443 | Peer ephemeral port |
+
+Consequence for consumers: **`dst_port` is not always the service port.** Use
+the backend-resolved `service` / `service_port` fields for anything shown to a
+user. `classifyService()` in `backend/internal/service/service_classifier.go`
+picks the service side by checking both ports against a known-service table and
+an ephemeral-range heuristic.
+
+### Direction values
+
+| Value | Meaning |
+| --- | --- |
+| `egress` | The observing VM sent these bytes. |
+| `ingress` | The observing VM received these bytes. |
+
+A single TCP conversation normally produces **two rows** on the observing VM,
+one per direction. They share `src_ip`, `dst_ip`, `protocol`, and `dst_port`.
+
+## 2. Flow identity
+
+Counters are aggregated into buckets. Two different bucket keys exist and they
+do not match on purpose.
+
+Agent-side bucket (`agent/internal/flow/key.go`):
+
+```text
+agent_id + src_ip + dst_ip + dst_port + protocol + direction + interface
+```
+
+Backend-side bucket (`backend/internal/service/flow_service.go`):
+
+```text
+src_vm_id + dst_vm_id + src_ip + dst_ip + protocol + dst_port + scope + direction
+```
+
+`src_port` is deliberately **not** part of either key. The stored `src_port` is
+the first local port observed for that bucket and is informational only. Do not
+use it to identify a socket, and do not treat it as stable.
+
+Practical effect: on a server VM, the peer's ephemeral port is part of the key,
+so a busy server produces one bucket per client connection. On a client VM the
+bucket collapses cleanly onto the peer service port.
+
+Measured in the lab on 2026-08-03: 30 HTTP requests across one VM pair produced
+roughly 20 distinct flow rows, because each client connection used a fresh
+ephemeral port. Any consumer listing `/api/flows` must group by
+`(src_ip, dst_ip, protocol, service_port)` before showing a relationship to a
+user, or the same logical connection will appear dozens of times.
+
+## 3. Passive eBPF flow metrics
+
+Passive tracking observes traffic that already exists. It never creates traffic.
+
+| Field | Unit | Produced by | Aggregation | Meaning |
+| --- | --- | --- | --- | --- |
+| `src_ip` / `dst_ip` | IPv4/IPv6 string | IP header (TC) or socket (kprobe), normalized to observer-first | Part of key | Who talked to whom. |
+| `protocol` | `tcp` / `udp` / `icmp` | IPv4 `protocol` / IPv6 `next_header` | Part of key | Transport protocol. |
+| `src_port` / `dst_port` | 0–65535 | TCP/UDP header or socket, normalized to observer-first | `dst_port` is part of key, `src_port` is first-seen only | See section 1. Both are `0` for ICMP. |
+| `direction` | enum | TC attach hook, or caller of `socket_metadata()` | Part of key | See section 1. |
+| `interface` | string | Agent config / registration | Part of agent key | Capture NIC, usually `ens3`. |
+| `bytes_sent` / `bytes_received` | bytes | `skb->len` per packet (TC) or `sendmsg`/`recvmsg` return value (kprobe) | Sum over the window | Split by `direction` in the bytes reducer. |
+| `packets` | count | +1 per observed packet | Sum over the window | TC path only. Kprobe events do not carry a packet count. |
+| `connection_count` | count | TCP SYN without ACK, or a `tcp_v4_connect` / `inet_csk_accept` hit | Sum over the window | Connection **attempts**, not established sessions. SYN retransmits count again. |
+| `request_count` | count | Inferred, see section 5 | Sum over the window | Best-effort request evidence. Not an HTTP request count. |
+| `error_count` | count | TCP RST flag seen | Sum over the window | Any RST, including RST-based teardown by healthy apps. |
+| `retransmission_count` | count | `kprobe/tcp_retransmit_skb` | Sum over the window | One per retransmitted segment. |
+| `avg_rtt_ms` | milliseconds | `kprobe/tcp_rcv_established`, see section 4 | Sample-weighted mean in the agent, then smoothed in the backend | TCP path latency. |
+| `avg_app_delay_ms` | milliseconds | **Not produced yet.** Always `0`. | — | Reserved for L7 request/response correlation. |
+| `first_seen` / `last_seen` | RFC3339 UTC | Agent wall clock at event decode | `LEAST` / `GREATEST` | Window boundaries, not kernel timestamps. |
+
+### Reporting window
+
+The agent drains its accumulator on `FLOW_INTERVAL` (default `2s`) and posts one
+event per bucket. Every counter in that event is a **delta for that window**, not
+a cumulative total. The backend adds deltas onto the stored aggregate row and
+also appends the raw delta to `flow_observations`.
+
+`avg_rtt_ms` and `avg_app_delay_ms` are the exception: they are averages for the
+window, not deltas.
+
+### Capture path
+
+```text
+TC ingress/egress hook  ──┐
+kprobe tcp/udp sockets  ──┤
+kprobe tcp_rcv_established│──► struct flow_event ──► ring buffer
+kprobe tcp_retransmit_skb ┘
+                             │
+                             ▼
+                  decode + normalize (ebpf_collector.go)
+                             │
+                             ▼
+                  reducers: bytes, packets, connection, rtt, retrans
+                             │
+                             ▼
+                  flow.State bucket, drained every FLOW_INTERVAL
+                             │
+                             ▼
+                  POST /api/flows/ingest
+```
+
+## 4. TCP kernel metrics
+
+These come from TCP socket state. They do not exist for UDP or ICMP.
+
+| Metric | Hook | How | Notes |
 | --- | --- | --- | --- |
-| Source IP | Read IPv4/IPv6 source address from packet header at TC ingress/egress | Implemented | Used to map traffic to VM source. |
-| Destination IP | Read IPv4/IPv6 destination address from packet header | Implemented | Used to map traffic to VM destination. |
-| Protocol | Read IPv4 `protocol` or IPv6 `next_header` | Implemented | TCP, UDP, ICMP are supported. |
-| Source port | Read first 2 bytes of TCP/UDP header | Implemented | Client ephemeral ports can be high/random. |
-| Destination port | Read bytes 2-3 of TCP/UDP header | Implemented | Service port, e.g. 80, 443, 8081, 5432. |
-| Direction | Determined from TC attach direction: ingress or egress | Implemented | Direction is packet direction at the observed VM interface. |
-| Interface | From collector attach/config, e.g. `ens3` | Implemented | Currently configured by agent settings/inventory. |
-| Bytes | `skb->len` per observed packet | Implemented | Aggregated into flow bytes sent/received. |
-| Packets | Increment once per observed packet | Implemented | Large counts are normal for tunnels, SSH, loops, or long windows. |
-| TCP flags | Read TCP flag byte | Partial | Used for SYN/request evidence and basic RST/failure signal. |
-| Connection count | Derived mostly from TCP SYN/request evidence | Partial | More reliable for TCP than UDP. |
-| Request count | Derived from request-like evidence and probes | Partial | Not a full HTTP request parser yet. |
-| Error count | Derived from failed probe and basic TCP error evidence | Partial | Needs stronger RST/timeout classification. |
+| RTT | `kprobe/tcp_rcv_established` | Reads `tcp_sock.srtt_us`, shifts right by 3 (the kernel stores it `<< 3`), converts to ms | Rate limited to one sample per socket per second (`RTT_EMIT_INTERVAL_NS`). |
+| Retransmission | `kprobe/tcp_retransmit_skb` | Emits one event with `retransmissions = 1` | Also stamps the current `srtt_us` on the same event, so a retransmission contributes an extra RTT sample outside the 1s rate limit. |
 
-Important rule:
+Attach is best-effort. If the kernel does not expose a symbol, the agent logs it
+as a disabled kprobe and keeps running with TC capture only. `/api/agents`
+reports which probes attached.
+
+### RTT attribution rule
+
+Both kprobes call `socket_metadata(..., DIR_EGRESS)`, so RTT and retransmission
+counters are always attributed to the **egress** row of a VM pair. The matching
+ingress row keeps `avg_rtt_ms = 0`.
+
+This is why the dashboard falls back to the graph edge RTT when a row has none
+(`FlowTelemetryTable.rttForFlow`). Any consumer that reads a single flow row must
+do the same, or read RTT from `/api/graph` where both directions are merged.
+
+### Backend RTT aggregation
+
+The backend does not compute a true mean across windows. It applies:
+
+```sql
+avg_rtt_ms = CASE
+    WHEN new > 0 AND avg_rtt_ms > 0 THEN (avg_rtt_ms + new) / 2
+    WHEN new > 0 THEN new
+    ELSE avg_rtt_ms
+END
+```
+
+That is an exponential moving average with α = 0.5, so the stored value tracks
+recent windows and is not a lifetime average. Read `avg_rtt_ms` as "smoothed
+recent RTT". The same rule applies to `avg_app_delay_ms`.
+
+## 5. Derived counters
+
+### request_count
+
+There is no HTTP parser in the passive path. `request_count` is inferred:
+
+```text
+if error_count > 0            → 0
+else if connection_count > 0  → connection_count
+else if protocol is UDP/ICMP and this window carried bytes → 1
+else                          → 0
+```
+
+Implemented in `connection.InferRequestCount` (agent) and re-applied by
+`metrics.InferRequestCount` (backend) only when the agent sent `0`.
+
+Two consequences worth stating plainly:
+
+- For TCP, `request_count` equals `connection_count`. It counts connection
+  attempts, not requests inside a connection. HTTP keep-alive traffic will show
+  many bytes and few requests.
+- A window with any RST reports `request_count = 0`, even if that window also
+  carried successful traffic.
+
+### error_count
+
+`error_count` counts RST packets. Applications that close with RST instead of
+FIN will register errors on a healthy path. Treat a non-zero `error_count` as
+"something reset a connection", not as "the path is broken". Combine it with
+probe results from `probing.md` before showing a red edge.
+
+## 6. Protocol coverage
+
+| Protocol | Available |
+| --- | --- |
+| TCP | IPs, ports, direction, bytes, packets, connection attempts, RST errors, RTT, retransmissions. |
+| UDP | IPs, ports, direction, bytes, packets. No connection state, no RTT. |
+| ICMP | IPs, direction, bytes, packets. Ports are forced to `0`. |
+
+For requests that do not name a port, the port still exists on the wire:
+`http://host/` is TCP 80 and `https://host/` is TCP 443.
+
+## 7. What passive capture does not prove
 
 ```text
 Passive eBPF observes traffic.
@@ -31,60 +226,7 @@ It does not prove that a configured connection exists.
 It only proves traffic was seen.
 ```
 
-## Passive eBPF flow path
+VMLens never captures packet payloads, HTTP bodies, TLS plaintext, SSH content,
+database queries, files, or command lines.
 
-```text
-TC ingress/egress hook
-    ↓
-read Ethernet header
-    ↓
-read IPv4/IPv6 header
-    ↓
-read protocol field
-    ↓
-if TCP/UDP:
-    read source port
-    read destination port
-    read TCP flags if TCP
-    ↓
-set bytes = skb->len
-increment packet count
-    ↓
-emit flow event
-    ↓
-userspace aggregate
-    ↓
-backend flow table and graph edge
-```
-
-## TCP kernel metrics
-
-These metrics come from TCP-specific kernel state. They do not apply to UDP or
-ICMP.
-
-| Metric | eBPF hook | How it is tracked | Current status | Notes |
-| --- | --- | --- | --- | --- |
-| TCP RTT | `kprobe/tcp_rcv_established` | Read TCP socket smoothed RTT (`srtt_us`) and convert to ms | Implemented | Kernel-dependent; attach can be disabled if unsupported. |
-| TCP retransmission | `kprobe/tcp_retransmit_skb` | Count retransmission events per flow/socket | Implemented | Good signal for packet loss/congestion. |
-| Attached kprobes | Agent collector attach result | Logged by agent at startup | Implemented | Shows which supplemental probes are active. |
-| Disabled kprobes | Attach failure or unsupported kernel | Logged by agent at startup | Implemented | Agent should continue with passive TC capture. |
-
-## TCP metric interpretation
-
-| Signal | Meaning |
-| --- | --- |
-| RTT high | Path or peer is slow, or queueing/congestion exists. |
-| Retransmission > 0 | TCP had to resend packets; possible packet loss or congestion. |
-| RTT missing | No TCP sample yet, UDP/ICMP traffic, or kprobe unavailable. |
-
-## Protocol notes
-
-| Protocol | What VMLens can track passively |
-| --- | --- |
-| TCP | IPs, ports, flags, bytes, packets, connection evidence, RTT, retransmission. |
-| UDP | IPs, ports, bytes, packets. No TCP-style connection state. |
-| ICMP | IPs, protocol/type-level flow. No TCP/UDP port. |
-
-For application requests that do not explicitly specify a port, the operating
-system or client library still uses a port. For example, `http://host/` uses TCP
-port 80 and `https://host/` uses TCP port 443.
+Known accuracy gaps and cleanup items are tracked in `known-gaps.md`.
