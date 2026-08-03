@@ -33,11 +33,21 @@ External IP ┘
 - Error counters for failed attempts such as refused TCP connections.
 - Internal vs external traffic based on registered VM inventory.
 - Connectivity probe RTT for idle connection state.
+- Application delay, measured from socket timing between a request being sent
+  and the first response byte arriving.
+- HTTP response status class for plaintext HTTP/1.x, as counters and the most
+  recent code.
 - Live topology state: green idle connection, yellow slow RTT, red failed path,
-  moving line for active request traffic.
+  moving dots for active request traffic.
 
-VMLens does not capture packet payloads, HTTP bodies, TLS plaintext, SSH
-content, database queries, files, command lines, or request/response bodies.
+VMLens does not capture HTTP bodies, TLS plaintext, SSH content, database
+queries, files, command lines, request/response bodies, URLs, headers, or
+cookies.
+
+The single exception to payload reading is the HTTP status line: eBPF inspects
+the first bytes of a plaintext TCP payload in kernel space and extracts only the
+three status digits as an integer. No payload bytes ever leave the kernel.
+Encrypted traffic yields no status at all. See `docs/privacy.md`.
 
 ## Quick start
 
