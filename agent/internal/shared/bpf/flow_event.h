@@ -17,6 +17,7 @@ struct flow_event {
     __u32 retransmissions;
     __u32 rtt_us;
     __u32 app_delay_us;
+    __u16 http_status;
 } __attribute__((packed));
 
 #endif // FLOW_EVENT_H

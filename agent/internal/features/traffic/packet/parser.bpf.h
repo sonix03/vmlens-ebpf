@@ -5,6 +5,7 @@
 #include "../../../shared/bpf/flow_event.h"
 #include "../../../shared/bpf/flow_maps.h"
 #include "../../classification/ports.bpf.h"
+#include "../../protocols/application/http/status.bpf.h"
 #include "../../protocols/transport/tcp/connection/request_response.bpf.h"
 #include "../bytes/bytes.bpf.h"
 #include "../packets/packets.bpf.h"
@@ -31,7 +32,8 @@ static __always_inline void fill_directional_tuple(struct flow_event *event, __u
 static __always_inline void populate_tc_event(struct flow_event *event, struct __sk_buff *skb,
                                               __u8 direction,
                                               struct network_metadata *network,
-                                              struct transport_metadata *transport)
+                                              struct transport_metadata *transport,
+                                              __u16 http_status)
 {
     __builtin_memset(event, 0, sizeof(*event));
     event->timestamp_ns = bpf_ktime_get_ns();
@@ -39,6 +41,7 @@ static __always_inline void populate_tc_event(struct flow_event *event, struct _
     event->family = network->family;
     event->protocol = network->protocol;
     event->direction = direction;
+    event->http_status = http_status;
     count_packet(event);
     mark_tc_request_response(event, network->protocol, transport->tcp_flags);
     fill_directional_tuple(event, direction, network->src_addr, network->dst_addr,
@@ -64,13 +67,16 @@ static __always_inline int emit_tc_packet(struct __sk_buff *skb, __u8 direction)
         return TC_ACT_OK;
     }
 
+    // Read the status line before reserving, so a non-HTTP packet costs nothing.
+    __u16 http_status = http_response_status(data, data_end, network.l4_offset, network.protocol);
+
     struct flow_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
     if (!event) {
         count_capture_stat(CAPTURE_STAT_RINGBUF_FULL);
         return TC_ACT_OK;
     }
 
-    populate_tc_event(event, skb, direction, &network, &transport);
+    populate_tc_event(event, skb, direction, &network, &transport, http_status);
     bpf_ringbuf_submit(event, 0);
     count_capture_stat(CAPTURE_STAT_EMITTED);
     return TC_ACT_OK;
