@@ -1146,3 +1146,200 @@ footer {
 .rtt-value.rtt-slow small {
   color: hsl(var(--orbit-warning));
 }
+
+/* ---------------------------------------------------------------------------
+   Data grid. Grafana-style: explicit cell rules on both axes, a solid sticky
+   header, no zebra striping, and tabular figures so numeric columns line up.
+   This block is last on purpose so it wins over the earlier table rules.
+   --------------------------------------------------------------------------- */
+
+:root {
+  --grid-line: 0 0% 25%;
+  --grid-line-soft: 0 0% 22%;
+  --grid-header: 0 0% 15.5%;
+  --grid-header-rule: 0 0% 34%;
+  --grid-row-height: 38px;
+}
+
+.activity-table-wrap {
+  max-height: 560px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.activity-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 11px;
+}
+
+/* Header ------------------------------------------------------------------ */
+
+.activity-table thead th {
+  position: sticky;
+  z-index: 3;
+  padding: 8px 12px;
+  border-right: 1px solid hsl(var(--grid-line) / .6);
+  border-bottom: 1px solid hsl(var(--grid-header-rule) / .85);
+  color: hsl(0 0% 68%);
+  background: hsl(var(--grid-header));
+  backdrop-filter: none;
+  font: 700 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: .07em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.activity-table thead th:last-child {
+  border-right: 0;
+}
+
+/* Two-row header: the group row pins at the top, the label row pins below it. */
+
+.activity-table thead .column-groups th {
+  top: 0;
+  height: 27px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid hsl(var(--grid-line) / .7);
+  color: hsl(var(--orbit-primary));
+  background: hsl(0 0% 13.5%);
+  font-size: 8px;
+  letter-spacing: .13em;
+  text-align: center;
+}
+
+.activity-table thead .column-groups th:empty {
+  color: transparent;
+}
+
+.activity-table thead .column-labels th {
+  top: 27px;
+  height: 33px;
+}
+
+/* Single-row headers keep the same pinning without the group row. */
+
+.activity-table thead tr:only-child th {
+  top: 0;
+  height: 33px;
+}
+
+/* Body -------------------------------------------------------------------- */
+
+.activity-table tbody td {
+  height: var(--grid-row-height);
+  padding: 7px 12px;
+  border-right: 1px solid hsl(var(--grid-line-soft) / .45);
+  border-bottom: 1px solid hsl(var(--grid-line-soft) / .45);
+  vertical-align: middle;
+}
+
+.activity-table tbody td:last-child {
+  border-right: 0;
+}
+
+.activity-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* Crisp lines read better than zebra once both axes are ruled. */
+.activity-table tbody tr:nth-child(even) {
+  background: transparent;
+}
+
+.activity-table tbody tr:hover {
+  background: hsl(var(--orbit-primary) / .07);
+}
+
+/* Numeric columns --------------------------------------------------------- */
+
+.activity-table th.numeric,
+.activity-table td.metric-number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-number {
+  font: 600 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* A zero counter is not news. Mute it so real values carry the eye. */
+.metric-number.metric-zero {
+  color: hsl(0 0% 42%);
+  font-weight: 400;
+}
+
+.metric-number.metric-warning,
+.metric-number.metric-error {
+  font-weight: 700;
+}
+
+/* Severity rows ----------------------------------------------------------- */
+
+.activity-table tbody tr.log-row-warning,
+.activity-table tbody tr.log-row-warning:nth-child(even) {
+  background: hsl(var(--orbit-warning) / .09);
+  box-shadow: none;
+}
+
+.activity-table tbody tr.log-row-error,
+.activity-table tbody tr.log-row-error:nth-child(even) {
+  background: hsl(var(--orbit-danger) / .09);
+  box-shadow: none;
+}
+
+.activity-table tbody tr.log-row-warning:hover {
+  background: hsl(var(--orbit-warning) / .15);
+}
+
+.activity-table tbody tr.log-row-error:hover {
+  background: hsl(var(--orbit-danger) / .15);
+}
+
+/* box-shadow on <tr> is unreliable with separated borders; anchor the accent
+   bar to the first cell instead. */
+.activity-table tbody tr.log-row-warning > td:first-child {
+  box-shadow: inset 3px 0 0 hsl(var(--orbit-warning));
+}
+
+.activity-table tbody tr.log-row-error > td:first-child {
+  box-shadow: inset 3px 0 0 hsl(var(--orbit-danger));
+}
+
+/* Cell content ------------------------------------------------------------ */
+
+.activity-time {
+  font: 600 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-endpoint {
+  padding: 5px 8px;
+  border-radius: 6px;
+}
+
+.activity-route {
+  min-width: 360px;
+  gap: 6px;
+}
+
+.metric-stack {
+  gap: 3px;
+}
+
+.telemetry-metrics-table {
+  min-width: 1520px;
+}
+
+.telemetry-metrics-table .activity-endpoint {
+  min-width: 128px;
+}
+
+
+.activity-empty {
+  height: 96px;
+  border-right: 0 !important;
+}

@@ -120,7 +120,23 @@ export function InternalActivityTable({
     </div>
     <div className="activity-table-wrap">
       <table className="activity-table">
-        <thead><tr><th>Observed UTC</th><th>Client → Server</th><th>Service</th><th>Observer side</th><th>RTT</th><th>Bytes</th><th>Frequency</th><th>Captured by</th></tr></thead>
+        <thead>
+          <tr className="column-groups">
+            <th colSpan={4}>Connection</th>
+            <th colSpan={3}>Performance</th>
+            <th>Evidence</th>
+          </tr>
+          <tr className="column-labels">
+            <th>Observed UTC</th>
+            <th>Client → Server</th>
+            <th>Service</th>
+            <th>Observer side</th>
+            <th>RTT (ms)</th>
+            <th>Bytes</th>
+            <th>Frequency</th>
+            <th>Captured by</th>
+          </tr>
+        </thead>
         <tbody>
           {activity.map((item) => {
             const key = rowKey(item)
@@ -135,7 +151,7 @@ export function InternalActivityTable({
             <td><span className="service-pill">{item.service}</span><small className="service-port">:{item.service_port}</small></td>
             <td><span className="protocol-pill">{item.protocol}</span><small className="direction-label">agent {item.direction}</small></td>
             <td><div className="metric-stack compact">
-              <span className={`rtt-value${rtt >= slowRTTThresholdMs ? ' rtt-slow' : ''}`}><strong>{rtt > 0 ? `${rtt.toFixed(2)} ms` : '—'}</strong><small>threshold {slowRTTThresholdMs} ms</small></span>
+              <span className={`rtt-value${rtt >= slowRTTThresholdMs ? ' rtt-slow' : ''}`}><strong>{rtt > 0 ? rtt.toFixed(2) : '—'}</strong><small>threshold {slowRTTThresholdMs} ms</small></span>
             </div></td>
             <td><div className="metric-stack">
               {metric('client → server', formatBytes(item.bytes_sent))}
