@@ -7,8 +7,6 @@ button, input, select { font: inherit; }
 .app-shell { width: min(1600px, 100%); min-height: 100vh; margin: 0 auto; padding: 0 24px 24px; }
 .app-header { height: 56px; display: flex; align-items: center; justify-content: flex-end; border-bottom: 1px solid #252a31; }
 .header-actions { display: flex; align-items: center; gap: 12px; }
-.grafana-link { height: 30px; display: inline-flex; align-items: center; padding: 0 11px; border: 1px solid #343b45; border-radius: 4px; color: #c7d2df; background: #151a20; font-size: 11px; font-weight: 600; text-decoration: none; }
-.grafana-link:hover { border-color: #526170; background: #1d252e; color: #eef3f8; }
 .live-state { display: flex; align-items: center; gap: 8px; color: #8b949e; font-size: 12px; }.live-state i { width: 7px; height: 7px; border-radius: 50%; background: #d05a5a; }.live-state i.connected { background: #4ea66f; }
 .stat-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 16px 0 12px; }.stat-card { min-height: 92px; padding: 14px 16px; background: #11161c; border: 1px solid #252b33; border-radius: 4px; }.stat-card span,.stat-card small { display: block; color: #8b949e; font-size: 11px; }.stat-card strong { display: block; margin: 7px 0 4px; color: #f0f2f4; font-size: 20px; font-weight: 600; }
 .filter-bar { display: flex; align-items: end; gap: 10px; margin-bottom: 12px; padding: 12px; border: 1px solid #252b33; border-radius: 4px; background: #11161c; }.filter-bar label { display: grid; gap: 5px; color: #8b949e; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }.filter-bar select,.filter-bar input { width: 135px; height: 35px; padding: 0 10px; border: 1px solid #343b45; border-radius: 3px; outline: none; color: #d6dae0; background: #151a20; }.filter-bar input { width: 118px; }.filter-bar select:focus,.filter-bar input:focus { border-color: #6f7884; }.filter-bar button { height: 35px; padding: 0 18px; border: 1px solid #4d725e; border-radius: 3px; background: #355343; color: #eef2ef; font-weight: 600; cursor: pointer; }
@@ -217,22 +215,6 @@ body {
   gap: 8px;
 }
 
-.grafana-link {
-  height: 34px;
-  padding: 0 13px;
-  border-color: hsl(var(--orbit-border) / .72);
-  border-radius: 999px;
-  color: hsl(var(--orbit-foreground) / .72);
-  background: hsl(var(--orbit-card) / .52);
-  backdrop-filter: blur(18px);
-}
-
-.grafana-link:hover {
-  border-color: hsl(var(--orbit-primary) / .48);
-  color: hsl(var(--orbit-foreground));
-  background: hsl(var(--orbit-primary) / .12);
-}
-
 .live-state {
   height: 34px;
   padding: 0 12px;
@@ -249,45 +231,6 @@ body {
 
 .live-state i.connected {
   background: hsl(var(--orbit-primary));
-}
-
-.category-tabs {
-  position: sticky;
-  top: 62px;
-  z-index: 25;
-  display: flex;
-  gap: 8px;
-  margin: 0 -24px;
-  padding: 11px 24px;
-  border-bottom: 1px solid hsl(var(--orbit-border) / .5);
-  background: hsl(var(--orbit-background) / .48);
-  backdrop-filter: blur(24px);
-  overflow-x: auto;
-}
-
-.category-tab {
-  height: 36px;
-  padding: 0 16px;
-  border: 1px solid hsl(var(--orbit-border) / .58);
-  border-radius: 999px;
-  color: hsl(var(--orbit-muted));
-  background: hsl(var(--orbit-card) / .38);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: border-color .16s ease, background-color .16s ease, color .16s ease, transform .16s ease;
-}
-
-.category-tab:hover {
-  border-color: hsl(var(--orbit-primary) / .36);
-  color: hsl(var(--orbit-foreground));
-  background: hsl(var(--orbit-primary) / .08);
-}
-
-.category-tab.active {
-  border-color: hsl(var(--orbit-primary) / .42);
-  color: hsl(var(--orbit-foreground));
-  background: hsl(var(--orbit-primary) / .18);
-  box-shadow: 0 0 20px hsl(var(--orbit-primary) / .12);
 }
 
 .stat-grid {
@@ -1074,11 +1017,7 @@ footer {
     padding-bottom: 12px;
   }
 
-  .category-tabs {
-    top: 94px;
-  }
-
-  .stat-grid {
+    .stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1089,14 +1028,7 @@ footer {
   }
 
   .app-header,
-  .category-tabs {
-    margin-right: -14px;
-    margin-left: -14px;
-    padding-right: 14px;
-    padding-left: 14px;
-  }
-
-  .header-actions {
+    .header-actions {
     justify-content: flex-start;
   }
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, GRAFANA_APPLICATION_HOST_URL, GRAFANA_L4_URL, GRAFANA_L7_URL, GRAFANA_NETWORK_HOST_URL } from './api/client'
+import { api } from './api/client'
 import { connectRealtime } from './api/realtime'
 import { EdgeDetailsPanel } from './components/EdgeDetailsPanel'
 import { FlowTelemetryTable, type FlowTableMode } from './components/FlowTelemetryTable'
@@ -23,7 +23,6 @@ const internalActivityLimit = 200
 
 const graphWindowLabel = graphWindow.time_range
 
-const categoryTabs = ['Orbit View', 'Compute', 'Network', 'Application', 'Diagnostics'] as const
 const activeWindowMs = 4000
 const canonicalRefreshDelayMs = 1000
 const tablePulseMs = 900
@@ -425,22 +424,9 @@ export function App() {
         </span>
       </div>
       <div className="header-actions">
-        <a className="grafana-link" href={GRAFANA_L4_URL} target="_blank" rel="noreferrer">Grafana L4</a>
-        <a className="grafana-link" href={GRAFANA_L7_URL} target="_blank" rel="noreferrer">Grafana L7</a>
-        <a className="grafana-link" href={GRAFANA_NETWORK_HOST_URL} target="_blank" rel="noreferrer">Network Host</a>
-        <a className="grafana-link" href={GRAFANA_APPLICATION_HOST_URL} target="_blank" rel="noreferrer">App Host</a>
         <div className="live-state"><i className={connected ? 'connected' : ''} /><span>{connected ? 'Realtime connected' : 'Realtime reconnecting'}</span></div>
       </div>
     </header>
-    <nav className="category-tabs" aria-label="Cloud product sections">
-      {categoryTabs.map((tab) => <button
-        key={tab}
-        type="button"
-        className={`category-tab${tab === 'Orbit View' ? ' active' : ''}`}
-      >
-        {tab}
-      </button>)}
-    </nav>
     {error && <div className="error-banner"><strong>Backend unavailable</strong><span>{error}</span></div>}
     <StatCards summary={summary} />
     <section className="workspace simple">
