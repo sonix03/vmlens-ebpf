@@ -78,6 +78,10 @@ Intended connection    = inventory/user intent says it should exist.
 
 ## Known limitations
 
+Limitations of the data model are listed below. Limitations of the current
+implementation — approximations, dead fields, and columns that can never fill —
+are tracked separately in `known-gaps.md`.
+
 | Limitation | Current handling |
 | --- | --- |
 | UDP has no TCP-style connection state | Track packets/ports; infer response if seen. |
