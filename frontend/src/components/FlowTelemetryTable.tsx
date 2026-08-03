@@ -49,6 +49,22 @@ function portRoles(flow: Flow) {
   return { client, server, resolved: server > 0 && server < ephemeralPortMin }
 }
 
+// HTTP status is derived in-kernel from a plaintext status line. Encrypted
+// traffic never carries one, so an empty cell means "not visible", not "no
+// response".
+function statusCell(flow: Flow) {
+  const last = flow.last_http_status ?? 0
+  const clientErrors = flow.http_4xx_count ?? 0
+  const serverErrors = flow.http_5xx_count ?? 0
+  if (!last) return <span className="status-none" title="No plaintext HTTP status line observed on this flow">—</span>
+  const tone = last >= 500 ? 'error' : last >= 400 ? 'warning' : last >= 300 ? 'redirect' : 'ok'
+  const failures = clientErrors + serverErrors
+  return <span className="status-stack">
+    <span className={`status-pill status-${tone}`}>{last}</span>
+    {failures > 0 ? <small>{serverErrors > 0 ? `${serverErrors}×5xx` : ''}{serverErrors > 0 && clientErrors > 0 ? ' · ' : ''}{clientErrors > 0 ? `${clientErrors}×4xx` : ''}</small> : null}
+  </span>
+}
+
 function portBox(value: number, resolved = true) {
   if (!value) return <span className="port-box port-box-empty">—</span>
   return <span className={`port-box${resolved ? '' : ' port-box-guess'}`} title={resolved ? undefined : 'Both ends are ephemeral; the client/server split is inferred, not observed.'}>{value}</span>
@@ -248,7 +264,8 @@ export function FlowTelemetryTable({
             <th colSpan={8}>Flow identity</th>
             <th colSpan={3}>Traffic</th>
             <th colSpan={3}>Attempts</th>
-            <th colSpan={3}>Path quality</th>
+            <th colSpan={2}>Path quality</th>
+            <th colSpan={2}>Application</th>
             <th>Observed by</th>
           </tr>
           <tr className="column-labels">
@@ -269,6 +286,7 @@ export function FlowTelemetryTable({
             <th className="numeric">Retrans</th>
             <th className="numeric">RTT (ms)</th>
             <th className="numeric">App delay (ms)</th>
+            <th>Status</th>
             <th>Agent</th>
           </tr>
         </thead>
@@ -298,13 +316,14 @@ export function FlowTelemetryTable({
               <td className={metricClass(item.retransmission_count, 'warning')}>{numberValue(item.retransmission_count)}</td>
               <td className={`${metricClass(rtt)} rtt-value${rtt >= slowRTTThresholdMs ? ' rtt-slow' : ''}`}>{latencyValue(rtt)}</td>
               <td className={metricClass(item.avg_app_delay_ms)}>{latencyValue(item.avg_app_delay_ms)}</td>
+              <td>{statusCell(item)}</td>
               <td><div className="metric-stack compact">
                 {metric('agent id', item.agent_id || '—')}
                 {metric('interface', item.interface_name || '—')}
               </div></td>
             </tr>
           })}
-          {rows.length === 0 && <tr><td colSpan={18} className="activity-empty">Waiting for TC/eBPF {mode} telemetry…</td></tr>}
+          {rows.length === 0 && <tr><td colSpan={19} className="activity-empty">Waiting for TC/eBPF {mode} telemetry…</td></tr>}
         </tbody>
       </table>
     </div>

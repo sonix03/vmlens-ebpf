@@ -50,6 +50,10 @@ export interface GraphEdge {
   total_bytes?: number
   avg_rtt_ms?: number
   avg_app_delay_ms?: number
+  http_2xx_count?: number
+  http_4xx_count?: number
+  http_5xx_count?: number
+  last_http_status?: number
   p95_rtt_ms?: number
   avg_response_duration_ms?: number
   last_response_code?: number

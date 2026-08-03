@@ -1017,7 +1017,7 @@ footer {
     padding-bottom: 12px;
   }
 
-    .stat-grid {
+  .stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1027,8 +1027,14 @@ footer {
     padding: 0 14px 20px;
   }
 
-  .app-header,
-    .header-actions {
+  .app-header {
+    margin-right: -14px;
+    margin-left: -14px;
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .header-actions {
     justify-content: flex-start;
   }
 
@@ -1298,8 +1304,62 @@ footer {
   background: hsl(var(--orbit-warning) / .08);
 }
 
+/* HTTP status. Absent is a first-class outcome here: TLS and non-HTTP flows
+   never expose a status line, so "—" means not visible, not "no response". */
+
+.status-stack {
+  display: grid;
+  gap: 2px;
+}
+
+.status-stack small {
+  color: hsl(var(--orbit-muted));
+  font: 8px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-transform: uppercase;
+}
+
+.status-pill {
+  display: inline-block;
+  min-width: 42px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font: 700 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.status-ok {
+  color: hsl(142 70% 82%);
+  border-color: hsl(var(--orbit-primary) / .45);
+  background: hsl(var(--orbit-primary) / .16);
+}
+
+.status-redirect {
+  color: hsl(var(--orbit-info));
+  border-color: hsl(var(--orbit-info) / .45);
+  background: hsl(var(--orbit-info) / .13);
+}
+
+.status-warning {
+  color: hsl(var(--orbit-warning));
+  border-color: hsl(var(--orbit-warning) / .5);
+  background: hsl(var(--orbit-warning) / .14);
+}
+
+.status-error {
+  color: hsl(0 84% 78%);
+  border-color: hsl(var(--orbit-danger) / .5);
+  background: hsl(var(--orbit-danger) / .14);
+}
+
+.status-none {
+  color: hsl(0 0% 42%);
+  font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 .telemetry-metrics-table {
-  min-width: 1780px;
+  min-width: 1880px;
 }
 
 .telemetry-metrics-table .activity-endpoint {
@@ -1311,17 +1371,16 @@ footer {
   font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-.activity-empty {
-  height: 96px;
-  border-right: 0 !important;
-}
-
 /* ---------------------------------------------------------------------------
    Orbit motion. Dots ride the edge path via SVG animateMotion, one stream per
-   direction that carries a live request. The old marching dash pattern is gone:
-   two dashed streams crossing on one line read as noise rather than as two
-   directions, so the line becomes a quiet rail and the dots carry the movement.
+   direction that actually carries traffic. Selecting a node lights its paths
+   and mutes the rest.
    --------------------------------------------------------------------------- */
+
+/* Solid rails. The old marching dash pattern competed with the dots: two
+   dashed streams crossing on one line read as noise rather than as two
+   directions, so the dash is dropped and the line becomes a quiet rail the
+   dots ride along. */
 
 .graph-edge {
   stroke-dasharray: none !important;
@@ -1388,11 +1447,6 @@ footer {
   filter: drop-shadow(0 0 7px #d9ad55);
 }
 
-/* No blanket suppression under prefers-reduced-motion. These dots are the
-   signal itself, not decoration: hiding them removes the only indication of
-   direction and liveliness. The preference is honoured by slowing and thinning
-   the stream instead, in EdgeParticles. */
-
 .graph-edge-group {
   transition: opacity .2s ease;
 }
@@ -1430,4 +1484,14 @@ text.graph-edge-muted {
     0 0 0 1px hsl(var(--orbit-primary) / .5),
     0 0 26px hsl(var(--orbit-primary) / .35),
     0 10px 26px #0006;
+}
+
+/* No blanket suppression under prefers-reduced-motion. These dots are the
+   signal itself, not decoration: hiding them removes the only indication of
+   direction and liveliness. The preference is honoured by slowing and thinning
+   the stream instead, in EdgeParticles. */
+
+.activity-empty {
+  height: 96px;
+  border-right: 0 !important;
 }
