@@ -39,7 +39,9 @@ One request per flow bucket per window. Source of truth:
 | `error_count` | int64 | yes | count | Window delta. RST count. |
 | `retransmission_count` | int64 | omitempty | count | Window delta. |
 | `avg_rtt_ms` | float | omitempty | ms | Window average, not a delta. |
-| `avg_app_delay_ms` | float | omitempty | ms | Reserved. The agent always sends `0` today. |
+| `avg_app_delay_ms` | float | omitempty | ms | Window average of time-to-first-response-byte. |
+| `http_1xx_count` … `http_5xx_count` | int64 | omitempty | count | Window deltas. Plaintext HTTP/1.x only; `0` for TLS. |
+| `last_http_status` | int | omitempty | 100–599 | Most recent code in the window. Omitted when no status line was seen. Rejected if outside 100–599. |
 | `first_seen` | RFC3339 | yes | UTC | Defaults to now if zero. |
 | `last_seen` | RFC3339 | yes | UTC | Defaults to `first_seen`. Rejected if before `first_seen`. |
 | `interface` | string | no | — | Capture NIC. |
@@ -86,6 +88,8 @@ Active connectivity probe result. See `probing.md` for policy.
 | `bytes_sent` / `bytes_received` / `packets` | int64 | backend | Cumulative sums. |
 | `connection_count` / `request_count` / `error_count` / `retransmission_count` | int64 | backend | Cumulative sums. |
 | `avg_rtt_ms` / `avg_app_delay_ms` | float | backend | Smoothed EMA (α = 0.5), not a lifetime mean. `0` means "no sample", not "0 ms". |
+| `http_1xx_count` … `http_5xx_count` | int64 | backend | Cumulative sums. `0` for TLS and non-HTTP flows. |
+| `last_http_status` | int | backend | Most recent observed code. Omitted when none was ever seen — which is not the same as a failed request. |
 | `requests_per_second` / `connections_per_second` | float | backend | Derived from the reported window with a 1 second minimum divisor. |
 | `first_seen` / `last_seen` | RFC3339 | backend | Lifetime of the bucket. |
 | `observed_at` | RFC3339 | backend | When the control plane last accepted an update. Use this for freshness. |

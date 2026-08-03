@@ -133,16 +133,20 @@ RST instead of FIN, and port scans, both register as errors on a healthy path.
 - Options: distinguish RST-during-handshake (refused) from RST-after-established
   (abortive close), and classify timeouts separately.
 
-### G6. `avg_app_delay_ms` is always zero
+### G6. `avg_app_delay_ms` had no producer — resolved
 
-`pipeline.FlowMetric.AppDelayMs` (`pipeline/event.go:37`) has no producer. It
-flows through the agent reducer, the ingest payload, the database, the graph
-edge, and into a dashboard column that can never show a value. The HTTP
-correlator under `features/protocols/application/http/` exists but is not wired
-into the pipeline.
+Previously the field flowed from the agent to a dashboard column that could
+never show a value. It is now produced from socket timing in
+`features/protocols/application/delay/delay.bpf.h`: `tcp_sendmsg` stamps the
+start of an outstanding request per socket and the return of `tcp_recvmsg`
+settles the delay once response bytes have arrived.
 
-- Options: wire the HTTP correlator, or drop the field from the payload and the
-  table until it has a producer.
+Remaining limits, documented in `metrics.md`:
+
+- It is time-to-first-response-byte on a socket, so it equals request latency
+  only for a one-request-at-a-time exchange. Keep-alive and pipelining break it.
+- TCP only.
+- Requires an agent built after this change. Older agents still report `0`.
 
 ### G7. Event provenance is inferred from empty fields
 
@@ -157,6 +161,21 @@ zero. The resulting `Source` value is then used only for debug logging
   hook produced a number.
 - Options: add a `u8 source` field to `struct flow_event` and propagate it to
   the ingest payload. Requires rebuilding `flow_tracker.bpf.o`.
+
+### G17. HTTP status is invisible for encrypted traffic
+
+Status codes come from reading a plaintext `HTTP/1.x` status line at TC ingress.
+That covers plain HTTP and nothing else.
+
+- TLS reports no status, because the plaintext never appears on the wire.
+  Reaching it would need uprobes on the TLS library's `SSL_read`/`SSL_write`,
+  which breaks across library versions and is far more invasive than the current
+  read.
+- HTTP/2 and HTTP/3 are not covered either: the status lives in a HPACK/QPACK
+  compressed header block, not a text line.
+- A missing status therefore means "not visible", never "no response". The
+  dashboard renders it as `—` with that wording in the tooltip, and a consumer
+  must not treat absence as failure.
 
 ## Open: modelling
 

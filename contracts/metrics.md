@@ -103,7 +103,9 @@ Passive tracking observes traffic that already exists. It never creates traffic.
 | `error_count` | count | TCP RST flag seen | Sum over the window | Any RST, including RST-based teardown by healthy apps. |
 | `retransmission_count` | count | `kprobe/tcp_retransmit_skb` | Sum over the window | One per retransmitted segment. |
 | `avg_rtt_ms` | milliseconds | `kprobe/tcp_rcv_established`, see section 4 | Sample-weighted mean in the agent, then smoothed in the backend | TCP path latency. |
-| `avg_app_delay_ms` | milliseconds | **Not produced yet.** Always `0`. | — | Reserved for L7 request/response correlation. |
+| `avg_app_delay_ms` | milliseconds | Socket timing, see section 4 | Sample-weighted mean, then smoothed in the backend | Time from request sent to first response byte. |
+| `http_1xx…5xx_count` | count | Status digits parsed in-kernel, see section 4 | Sum over the window | Plaintext HTTP/1.x only. Always `0` for TLS. |
+| `last_http_status` | 100–599 | As above | Last observed wins | `0`/absent means no status line was seen. |
 | `first_seen` / `last_seen` | RFC3339 UTC | Agent wall clock at event decode | `LEAST` / `GREATEST` | Window boundaries, not kernel timestamps. |
 
 ### Reporting window
@@ -159,6 +161,49 @@ ingress row keeps `avg_rtt_ms = 0`.
 This is why the dashboard falls back to the graph edge RTT when a row has none
 (`FlowTelemetryTable.rttForFlow`). Any consumer that reads a single flow row must
 do the same, or read RTT from `/api/graph` where both directions are merged.
+
+## Application metrics
+
+These two are the only signals above the transport layer.
+
+### Application delay
+
+Measured from socket timing, not payload. `tcp_sendmsg` stamps the start of an
+outstanding request per socket; the return of `tcp_recvmsg` settles the delay
+when the response bytes have actually arrived. Reading it at call entry instead
+would time the application's readiness rather than the network.
+
+| Property | Value |
+| --- | --- |
+| Applies to | TCP only. UDP sockets can be unconnected and shared across peers, which would mix conversations. |
+| Measures | Time to first response byte on that socket. |
+| Does not measure | Per-request duration on a connection carrying several requests. Keep-alive and pipelining break the one-to-one mapping. |
+| Encrypted traffic | Works. No payload is involved. |
+| Discarded | Samples above 60 s, so an idle keep-alive socket does not report its idle time as latency. |
+
+### HTTP status
+
+The eBPF program reads the first bytes of a TCP payload at TC ingress, checks
+for an `HTTP/1.x ` prefix, and converts the three status digits into an integer.
+
+```text
+Read in kernel:  "HTTP/1.1 404"
+Leaves kernel:   404
+```
+
+Nothing else is read and no payload byte is copied into the ring buffer. Request
+lines, URLs, headers, cookies, reason phrases, and bodies are never touched. See
+`docs/privacy.md`.
+
+| Property | Value |
+| --- | --- |
+| Applies to | Plaintext HTTP/1.x over TCP. |
+| Encrypted traffic | Reports nothing. The plaintext is not on the wire. |
+| Granularity | Class counters plus the most recent code, per flow bucket. |
+| Absent value | `0` means no status line was observed, which is the normal case for every non-HTTP and every TLS flow. It does not mean "no response". |
+
+A consumer must not read a missing status as an application failure. Combine it
+with `error_count` and probe evidence before calling a path unhealthy.
 
 ### Backend RTT aggregation
 
