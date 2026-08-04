@@ -187,14 +187,19 @@ function rttForFlow(flow: Flow, lookup: EdgeLookup, edge?: GraphEdge) {
 }
 
 function severity(flow: Flow, rtt: number, edge?: GraphEdge): RowSeverity {
-  if ((flow.error_count ?? 0) > 0 || edge?.failed) return 'error'
-  if (rtt >= slowRTTThresholdMs) return 'warning'
+  if ((flow.error_count ?? 0) > 0 || (flow.http_5xx_count ?? 0) > 0 || edge?.failed) return 'error'
+  if ((flow.http_4xx_count ?? 0) > 0 || rtt >= slowRTTThresholdMs) return 'warning'
   return 'normal'
 }
 
 function signal(flow: Flow, rowSeverity: RowSeverity) {
+  // An application status is more specific than "something moved", so it wins
+  // the badge when one was observed.
+  if ((flow.http_5xx_count ?? 0) > 0) return 'HTTP 5XX'
+  if ((flow.http_4xx_count ?? 0) > 0) return 'HTTP 4XX'
   if (rowSeverity === 'error') return 'FAILED'
   if (rowSeverity === 'warning') return 'SLOW RTT'
+  if ((flow.http_2xx_count ?? 0) > 0 || (flow.http_3xx_count ?? 0) > 0) return 'HTTP OK'
   if ((flow.request_count ?? 0) > 0) return 'REQUEST'
   if ((flow.connection_count ?? 0) > 0) return 'CONNECTED'
   return 'OBSERVED'
@@ -281,11 +286,12 @@ export function FlowTelemetryTable({
       <table className="activity-table telemetry-table telemetry-metrics-table">
         <thead>
           <tr className="column-groups">
-            <th colSpan={8}>Flow identity</th>
+            <th colSpan={6}>Flow identity</th>
+            <th colSpan={2}>Ports</th>
+            <th colSpan={2}>Application</th>
             <th colSpan={3}>Traffic</th>
             <th colSpan={3}>Attempts</th>
             <th colSpan={2}>Path quality</th>
-            <th colSpan={2}>Application</th>
             <th>Observed by</th>
           </tr>
           <tr className="column-labels">
@@ -297,6 +303,8 @@ export function FlowTelemetryTable({
             <th>Service</th>
             <th className="numeric">Client port</th>
             <th className="numeric">Server port</th>
+            <th>Status</th>
+            <th className="numeric">App delay (ms)</th>
             <th className="numeric">Sent</th>
             <th className="numeric">Received</th>
             <th className="numeric">Packets</th>
@@ -305,8 +313,6 @@ export function FlowTelemetryTable({
             <th className="numeric">Errors</th>
             <th className="numeric">Retrans</th>
             <th className="numeric">RTT (ms)</th>
-            <th className="numeric">App delay (ms)</th>
-            <th>Status</th>
             <th>Agent</th>
           </tr>
         </thead>
@@ -327,6 +333,8 @@ export function FlowTelemetryTable({
               <td>{serviceCell(item)}</td>
               <td className="port-cell">{portBox(ports.client, ports.resolved)}</td>
               <td className="port-cell">{portBox(ports.server, ports.resolved)}</td>
+              <td>{statusCell(item)}</td>
+              <td className={metricClass(item.avg_app_delay_ms)}>{latencyValue(item.avg_app_delay_ms)}</td>
               <td className={metricClass(item.bytes_sent)}>{formatBytes(item.bytes_sent)}</td>
               <td className={metricClass(item.bytes_received)}>{formatBytes(item.bytes_received)}</td>
               <td className={metricClass(item.packets)}>{numberValue(item.packets)}</td>
@@ -335,8 +343,6 @@ export function FlowTelemetryTable({
               <td className={metricClass(item.error_count, 'error')}>{numberValue(item.error_count)}</td>
               <td className={metricClass(item.retransmission_count, 'warning')}>{numberValue(item.retransmission_count)}</td>
               <td className={`${metricClass(rtt)} rtt-value${rtt >= slowRTTThresholdMs ? ' rtt-slow' : ''}`}>{latencyValue(rtt)}</td>
-              <td className={metricClass(item.avg_app_delay_ms)}>{latencyValue(item.avg_app_delay_ms)}</td>
-              <td>{statusCell(item)}</td>
               <td><div className="metric-stack compact">
                 {metric('agent id', item.agent_id || '—')}
                 {metric('interface', item.interface_name || '—')}
