@@ -52,16 +52,36 @@ function portRoles(flow: Flow) {
 // HTTP status is derived in-kernel from a plaintext status line. Encrypted
 // traffic never carries one, so an empty cell means "not visible", not "no
 // response".
+function statusTone(code: number) {
+  if (code >= 500) return 'error'
+  if (code >= 400) return 'warning'
+  if (code >= 300) return 'redirect'
+  return 'ok'
+}
+
 function statusCell(flow: Flow) {
   const last = flow.last_http_status ?? 0
-  const clientErrors = flow.http_4xx_count ?? 0
-  const serverErrors = flow.http_5xx_count ?? 0
   if (!last) return <span className="status-none" title="No plaintext HTTP status line observed on this flow">—</span>
-  const tone = last >= 500 ? 'error' : last >= 400 ? 'warning' : last >= 300 ? 'redirect' : 'ok'
-  const failures = clientErrors + serverErrors
+
+  // Always show the real code, coloured by its own class, so the number and its
+  // colour can never disagree. The per-class tally underneath is what tells you
+  // the bucket held more than this one response; the row tint carries the worst
+  // of them.
+  const classes: Array<[string, number]> = [
+    ['1xx', flow.http_1xx_count ?? 0],
+    ['2xx', flow.http_2xx_count ?? 0],
+    ['3xx', flow.http_3xx_count ?? 0],
+    ['4xx', flow.http_4xx_count ?? 0],
+    ['5xx', flow.http_5xx_count ?? 0],
+  ]
+  const seen = classes.filter(([, count]) => count > 0)
+  const total = seen.reduce((sum, [, count]) => sum + count, 0)
+
   return <span className="status-stack">
-    <span className={`status-pill status-${tone}`}>{last}</span>
-    {failures > 0 ? <small>{serverErrors > 0 ? `${serverErrors}×5xx` : ''}{serverErrors > 0 && clientErrors > 0 ? ' · ' : ''}{clientErrors > 0 ? `${clientErrors}×4xx` : ''}</small> : null}
+    <span className={`status-pill status-${statusTone(last)}`} title={`Most recent status code on this flow: ${last}`}>{last}</span>
+    {total > 1 ? <small className="status-tally">
+      {seen.map(([label, count]) => <em key={label} className={`status-tally-${label}`}>{count}×{label}</em>)}
+    </small> : null}
   </span>
 }
 

@@ -1318,6 +1318,24 @@ footer {
   text-transform: uppercase;
 }
 
+/* Per-class tally. Each class keeps its own colour so a 5xx count is readable
+   without decoding the row tint. */
+.status-tally {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-tally em {
+  font-style: normal;
+}
+
+.status-tally-2xx { color: hsl(142 60% 62%); }
+.status-tally-3xx { color: hsl(var(--orbit-info)); }
+.status-tally-4xx { color: hsl(var(--orbit-warning)); }
+.status-tally-5xx { color: hsl(0 84% 72%); }
+
 .status-pill {
   display: inline-block;
   min-width: 42px;
