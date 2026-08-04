@@ -8,6 +8,12 @@ import (
 	"time"
 )
 
+// Version is what the agent reports to the backend, stamped at link time by
+// scripts/build-agent-release.sh with the release tag. An unstamped build says
+// "dev", which is honest: that is what a binary built outside the release path
+// is. AGENT_VERSION still overrides it for a one-off test.
+var Version = "dev"
+
 type Config struct {
 	BackendURL                  string
 	MockMode                    bool
@@ -89,7 +95,7 @@ func Load() (Config, error) {
 		AllowCIDRs:  csv(os.Getenv("FLOW_ALLOW_CIDRS")),
 		DenyCIDRs:   csv(os.Getenv("FLOW_DENY_CIDRS")),
 		FlowDebug:   flowDebug,
-		Environment: env("AGENT_ENVIRONMENT", "local"), AgentVersion: env("AGENT_VERSION", "0.1.0"),
+		Environment: env("AGENT_ENVIRONMENT", "local"), AgentVersion: env("AGENT_VERSION", Version),
 	}, nil
 }
 

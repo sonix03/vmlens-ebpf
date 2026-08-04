@@ -63,8 +63,12 @@ for arch in ${target_arches}; do
   echo "building vmlens-agent linux/${goarch}"
   (
     cd "${repo_dir}/agent"
+    # Stamp the version into the binary. Without this every agent reports the
+    # built-in default no matter which release it came from, and there is no way
+    # to tell from the dashboard which VM runs which build.
     CGO_ENABLED=0 GOOS=linux GOARCH="${goarch}" \
-      go build -trimpath -ldflags="-s -w" \
+      go build -trimpath \
+      -ldflags="-s -w -X github.com/vmlens/vmlens/agent/internal/config.Version=${version}" \
       -buildvcs=false \
       -o "${out_dir}/vmlens-agent-linux-${arch}" ./cmd/agent
   )

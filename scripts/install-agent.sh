@@ -34,6 +34,7 @@ AGENT_BINARY_URL="${AGENT_BINARY_URL:-}"
 AGENT_BINARY_PATH="${AGENT_BINARY_PATH:-}"
 BPF_OBJECT_URL="${BPF_OBJECT_URL:-}"
 BPF_OBJECT_PATH="${BPF_OBJECT_PATH:-}"
+AGENT_VERSION="${AGENT_VERSION:-}"
 
 if [[ -z "${BACKEND_URL}" ]]; then
   echo "BACKEND_URL is required" >&2
@@ -280,6 +281,9 @@ FLOW_ALLOW_CIDRS=${FLOW_ALLOW_CIDRS}
 FLOW_DENY_CIDRS=${FLOW_DENY_CIDRS}
 FLOW_DEBUG=${FLOW_DEBUG}
 AGENT_ENVIRONMENT=${AGENT_ENVIRONMENT}
+# Empty means the version stamped into the binary at build time wins, which is
+# what you want. Set it only to label a hand-built agent.
+AGENT_VERSION=${AGENT_VERSION}
 EOF
 chmod 0640 /etc/vmlens/agent.env
 
