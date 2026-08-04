@@ -1489,7 +1489,20 @@ text.graph-edge-muted {
 }
 
 .graph-node-button {
+  cursor: grab;
   transition: opacity .2s ease, border-color .15s ease, background-color .15s ease, transform .15s ease;
+}
+
+/* While a node is being dragged it follows the pointer, so the hover lift and
+   the position transition would both fight the cursor. */
+.graph-node-button.vm-node-dragging,
+.graph-node-button.vm-node-dragging:hover {
+  z-index: 3;
+  cursor: grabbing;
+  border-color: hsl(var(--orbit-primary) / .9);
+  box-shadow: 0 22px 44px rgba(0, 0, 0, .55), 0 0 30px hsl(var(--orbit-primary) / .22);
+  transform: none;
+  transition: none;
 }
 
 .graph-node-button.vm-node-muted {
@@ -1513,7 +1526,6 @@ text.graph-edge-muted {
   height: 96px;
   border-right: 0 !important;
 }
-
 
 /* ---------------------------------------------------------------------------
    Circular nodes. The pill shape meant edges were anchored to a bounding box

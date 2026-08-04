@@ -321,6 +321,10 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect, selectedNod
   const calmMotion = useReducedMotion()
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 })
   const [panning, setPanning] = useState(false)
+  // A node keeps whatever place the user dropped it in; nodes never dragged stay
+  // on the automatic grid, so a new VM still arrives in a sane slot.
+  const [nodePositions, setNodePositions] = useState<Record<string, Point>>({})
+  const [draggingNodeID, setDraggingNodeID] = useState<string>()
   const canvasRef = useRef<HTMLDivElement>(null)
   const lastVMNodes = useRef<GraphNode[]>([])
   const panState = useRef<{
@@ -328,6 +332,16 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect, selectedNod
     startPointer: Point
     startViewport: Viewport
   }>()
+  const dragState = useRef<{
+    pointerId: number
+    nodeID: string
+    startPointer: Point
+    startPosition: Point
+    moved: boolean
+  }>()
+  // A drag ends with a click event on the button. Without this the drop would
+  // also open the node panel, which is not what dragging asked for.
+  const suppressClick = useRef(false)
 
   useEffect(() => {
     const interval = window.setInterval(() => setClock(Date.now()), 250)
@@ -390,6 +404,52 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect, selectedNod
     setPanning(false)
   }
 
+  function handleNodePointerDown(event: ReactPointerEvent<HTMLButtonElement>, nodeID: string, position: Point) {
+    if (event.button !== 0) return
+    // The canvas would otherwise start a pan under the node being dragged.
+    event.stopPropagation()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    dragState.current = {
+      pointerId: event.pointerId,
+      nodeID,
+      startPointer: { x: event.clientX, y: event.clientY },
+      startPosition: position,
+      moved: false,
+    }
+    setDraggingNodeID(nodeID)
+  }
+
+  function handleNodePointerMove(event: ReactPointerEvent<HTMLButtonElement>) {
+    const drag = dragState.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    const screenDX = event.clientX - drag.startPointer.x
+    const screenDY = event.clientY - drag.startPointer.y
+    // A few pixels of travel while clicking is normal, so only past that does
+    // this become a drag rather than a selection.
+    if (!drag.moved && Math.hypot(screenDX, screenDY) < 4) return
+    drag.moved = true
+    // The map is scaled, so pointer pixels have to be converted back into map
+    // units or the node would lag behind or overshoot the cursor when zoomed.
+    setNodePositions((current) => ({
+      ...current,
+      [drag.nodeID]: {
+        x: Math.max(0, drag.startPosition.x + screenDX / viewport.zoom),
+        y: Math.max(0, drag.startPosition.y + screenDY / viewport.zoom),
+      },
+    }))
+  }
+
+  function finishNodeDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    const drag = dragState.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    suppressClick.current = drag.moved
+    dragState.current = undefined
+    setDraggingNodeID(undefined)
+  }
+
   const graphNodes = useMemo(() => [...graph.nodes]
     .sort((a, b) => nodeSortKey(a).localeCompare(nodeSortKey(b))), [graph.nodes])
   if (graphNodes.length > 0) {
@@ -401,7 +461,7 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect, selectedNod
   const nodes = useMemo(() => visibleGraphNodes.map((node, index) => {
     const status = node.status || 'unknown'
     const color = statusColors[status] || statusColors.unknown
-    const position = positionForSlot(index, visibleGraphNodes.length)
+    const position = nodePositions[node.id] || positionForSlot(index, visibleGraphNodes.length)
     return {
       node,
       color,
@@ -409,7 +469,7 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect, selectedNod
       position,
       center: { x: position.x + nodeRadius, y: position.y + nodeRadius },
     }
-  }), [visibleGraphNodes])
+  }), [visibleGraphNodes, nodePositions])
   const nodeByID = useMemo(() => new Map(nodes.map((item) => [item.node.id, item])), [nodes])
 
   const edges = useMemo(() => {
@@ -753,10 +813,20 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect, selectedNod
         key={node.id}
         type="button"
         data-testid={`node-${node.id}`}
-        className={`graph-node-button vm-node-${status}${focus ? (focus.id === node.id ? ' vm-node-selected' : focus.neighbours.has(node.id) ? '' : ' vm-node-muted') : ''}`}
+        className={`graph-node-button vm-node-${status}${draggingNodeID === node.id ? ' vm-node-dragging' : ''}${focus ? (focus.id === node.id ? ' vm-node-selected' : focus.neighbours.has(node.id) ? '' : ' vm-node-muted') : ''}`}
         title={`${node.label} · ${node.ip || 'no IP'} · ${status}`}
         style={{ left: position.x, top: position.y, borderColor: node.status === 'online' ? color : `${color}80` }}
-        onClick={() => onNodeSelect(node)}
+        onPointerDown={(event) => handleNodePointerDown(event, node.id, position)}
+        onPointerMove={handleNodePointerMove}
+        onPointerUp={finishNodeDrag}
+        onPointerCancel={finishNodeDrag}
+        onClick={() => {
+          if (suppressClick.current) {
+            suppressClick.current = false
+            return
+          }
+          onNodeSelect(node)
+        }}
       >
         <span className="vm-node-glyph">
           {node.type === 'external' ? <ExternalIcon /> : <VMIcon />}
@@ -771,7 +841,14 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect, selectedNod
     <div className="graph-controls" aria-label="Map controls">
       <button type="button" onClick={() => zoomFromCenter(1.18)}>+</button>
       <button type="button" onClick={() => zoomFromCenter(0.82)}>−</button>
-      <button type="button" onClick={() => setViewport({ x: 0, y: 0, zoom: 1 })}>Reset</button>
+      <button
+        type="button"
+        title="Reset zoom, pan, and dragged node positions"
+        onClick={() => {
+          setViewport({ x: 0, y: 0, zoom: 1 })
+          setNodePositions({})
+        }}
+      >Reset</button>
       <span>{Math.round(viewport.zoom * 100)}%</span>
     </div>
   </div>
