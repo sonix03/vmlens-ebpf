@@ -32,7 +32,7 @@ closed port 65534 returned `000` as expected.
 | `dst_port` is the peer port, not the service port | Confirmed. Server-side rows carry the client's ephemeral port and rely on `service` to recover `http-alt`. |
 | Server-side buckets multiply per client connection | Confirmed, and worse than described. 30 requests produced roughly 20 separate flow rows for the single `.199 ↔ .130` relationship. |
 | G5: RST counted as error on a healthy path | Confirmed. The `.130 ↔ .220` port-8081 edge reported `err = 10` while all 30 HTTP requests succeeded. |
-| G1: RTT only on the egress row | **Not testable here.** The deployed agent is `dist/agent/v3.1`, built before commit `8d66cd7` ("Attach TCP kernel probes"). It contains zero kprobe symbols, so no kernel RTT is collected at all. |
+| G1: RTT only on the egress row | Was untestable at the time: the deployed agent predated the TCP kprobes. **Confirmed on 2026-08-03** once v3.3 was deployed — see below. |
 
 On RTT specifically: every `traffic` edge reported `avg_rtt_ms = 0.00`, and the
 only non-zero RTT in the system came from `reachability` edges on port 18081,
@@ -68,7 +68,19 @@ evidence exists, but not on the row a consumer would read to judge the attempt.
   `direction` from the key for TCP error attribution the same way G1 proposes
   for RTT.
 
-### G1. RTT and retransmissions only land on the egress row
+### G1. RTT and retransmissions only land on the egress row — confirmed
+
+Measured against the lab with agent v3.3, the first build carrying the TCP
+kprobes:
+
+```text
+flow rows with avg_rtt_ms > 0, direction egress  : 45
+flow rows with avg_rtt_ms > 0, direction ingress :  0
+```
+
+Not a single ingress row carries latency. The prediction below was made from
+reading the code; the numbers now settle it.
+
 
 `emit_tcp_rtt_sample()` and `emit_tcp_retransmission()` both call
 `socket_metadata(..., DIR_EGRESS)`, and `direction` is part of the flow key. The
