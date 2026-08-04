@@ -136,7 +136,45 @@ curl -s http://<VM-A-IP>:8081/ >/dev/null
 Within about ten seconds the pair appears in the dashboard topology, and
 `/api/internal/activity` shows the flow.
 
-## 5. Troubleshooting
+## 5. Busy VMs
+
+The default `FLOW_INTERVAL=1s` is meant for a quiet lab. On a VM carrying real
+traffic — a Redis client, a Kubernetes node, anything with steady connection
+churn — add these to the install command:
+
+```bash
+FLOW_INTERVAL=5s
+IGNORE_PORTS=18080,18081,18082,6379   # add ports whose traffic you already understand
+```
+
+`5s` cuts the number of posts and database rows roughly fivefold. The lost time
+resolution does not matter for mapping dependencies.
+
+Install on **one** busy VM first and watch it for an hour before doing more.
+Two numbers tell you whether it is coping:
+
+```bash
+sudo bpftool map dump name capture_stats   # key 10 is the dropped-event counter
+ps -o rss=,pcpu= -C vmlens-agent           # resident memory and CPU
+```
+
+Key 10 must stay at `0`, and RSS must stay flat. If either climbs, stop the
+agent and report it — the capture is not keeping up with the traffic.
+
+### What a dropped event means
+
+If the kernel produces events faster than the agent can drain them, the extra
+events are discarded. Nothing on the VM is affected: no traffic is touched, no
+service is slowed, nothing is corrupted, and capture returns to normal by itself
+once the load drops. What suffers is only VMLens's own record, and it always
+errs in one direction — it undercounts, never overcounts.
+
+The practical consequence:
+
+> What the dashboard shows is real. What it does not show may simply not have
+> been seen yet. Never read an empty dashboard as "there is no traffic".
+
+## 6. Troubleshooting
 
 Four failures account for nearly everything, and all four have a clear symptom.
 
@@ -195,7 +233,7 @@ curl -s http://localhost:8080/api/agents   # on the control plane: did it regist
 If the VM reaches the control plane but no agent is listed, read the agent log —
 it prints the HTTP status the control plane returned.
 
-## 6. Removing the agent
+## 7. Removing the agent
 
 ```bash
 sudo systemctl disable --now vmlens-agent
