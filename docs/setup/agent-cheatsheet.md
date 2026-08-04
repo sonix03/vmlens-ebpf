@@ -8,6 +8,26 @@ form only works with `configs/vms.local`, which is not in the repo.
 
 Replace `amd64` with `arm64` on an ARM VM (`uname -m` says `aarch64`).
 
+## 0. Local: get the repo
+
+Needs `git` and Docker with the compose plugin. Nothing else — the frontend and
+backend are built inside containers.
+
+```bash
+git clone https://github.com/sonix03/vmlens-ebpf.git
+cd vmlens-ebpf
+```
+
+Steps 1, 2 and 8 all run from this directory.
+
+Optional: VM metadata such as role and zone comes from `configs/vms.local`,
+which is not in the repo. Without it the stack runs fine and VMs simply show up
+with no extra labels.
+
+```bash
+cp configs/vms.example configs/vms.local   # then edit to match your VMs
+```
+
 ## 1. Local: start the stack
 
 ```bash
