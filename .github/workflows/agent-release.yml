@@ -5,9 +5,20 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to stamp on a dry run. No release is created; the publish job only runs for tags."
+        required: false
+        default: "dryrun"
 
 permissions:
   contents: write
+
+env:
+  # A dry run must stamp something other than the branch name. Every Go binary
+  # contains the string "main", so verifying the stamp against a branch called
+  # main would pass without proving anything.
+  RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
 
 jobs:
   build-agent:
@@ -65,12 +76,12 @@ jobs:
           bpftool version || true
           ls -l /usr/include/bpf/bpf_helpers.h agent/ebpf/include/vmlinux_fallback.h
           ls -l /sys/kernel/btf/vmlinux || true
-          VERSION="${GITHUB_REF_NAME:-dev}" TARGET_ARCHES="${{ matrix.arch }}" CLANG_BIN=clang-18 bash -x scripts/build-agent-release.sh
+          VERSION="${RELEASE_VERSION}" TARGET_ARCHES="${{ matrix.arch }}" CLANG_BIN=clang-18 bash -x scripts/build-agent-release.sh
 
       - name: Verify the version stamp landed in the binary
         run: |
           set -eu
-          VERSION="${GITHUB_REF_NAME:-dev}"
+          VERSION="${RELEASE_VERSION}"
           BINARY="dist/agent/${VERSION}/vmlens-agent-linux-${{ matrix.arch }}"
           # An agent that cannot report which release it is makes every field
           # report ambiguous, so a missing stamp fails the build rather than
@@ -100,13 +111,26 @@ jobs:
         with:
           pattern: vmlens-agent-artifacts-*
           merge-multiple: true
-          path: dist/agent
+          path: downloaded
 
-      - name: Regenerate SHA256SUMS over the assets that exist
+      - name: Stage the assets and regenerate SHA256SUMS over them
         run: |
           set -eu
-          cd "dist/agent/${GITHUB_REF_NAME}"
-          test -f vmlens-agent-linux-amd64 || { echo "amd64 agent binary missing; refusing to publish" >&2; exit 1; }
+          # upload-artifact strips the common parent of everything it matched,
+          # so whether the version directory survives the round trip depends on
+          # how many files were in it. Flatten instead of guessing: the names
+          # are unique across both architectures anyway.
+          mkdir -p staging
+          find downloaded -type f -exec cp -f {} staging/ \;
+          cd staging
+          ls -l
+          test -f vmlens-agent-linux-amd64 \
+            || { echo "amd64 agent binary missing; refusing to publish" >&2; exit 1; }
+          test -f flow_tracker-linux-amd64.bpf.o \
+            || { echo "amd64 eBPF object missing; refusing to publish" >&2; exit 1; }
+          test -f install-agent.sh \
+            || { echo "installer missing; refusing to publish" >&2; exit 1; }
+          # Regenerated here because each build job only ever saw its own arch.
           sha256sum install-agent.sh vmlens-agent-linux-* flow_tracker-linux-*.bpf.o >SHA256SUMS
           cat SHA256SUMS
 
@@ -114,7 +138,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/agent/${{ github.ref_name }}/vmlens-agent-linux-*
-            dist/agent/${{ github.ref_name }}/flow_tracker-linux-*.bpf.o
-            dist/agent/${{ github.ref_name }}/install-agent.sh
-            dist/agent/${{ github.ref_name }}/SHA256SUMS
+            staging/vmlens-agent-linux-*
+            staging/flow_tracker-linux-*.bpf.o
+            staging/install-agent.sh
+            staging/SHA256SUMS
