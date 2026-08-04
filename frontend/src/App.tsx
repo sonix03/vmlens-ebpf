@@ -12,7 +12,7 @@ import type { ConnectionSummary, GraphData, GraphEdge, GraphFilters, GraphNode }
 import type { InternalActivity } from './types/internalActivity'
 import type { Summary } from './types/stats'
 import type { VM } from './types/vm'
-import { isConnectionFlow, isRequestFlow } from './utils/flowFilters'
+import { isConnectionFlow, isHTTPFlow, isRequestFlow } from './utils/flowFilters'
 
 const graphWindow: GraphFilters = {
   vm_id: '', scope: '', protocol: '', port: '', time_range: '15m', min_bytes: '', status: '',
@@ -384,6 +384,7 @@ export function App() {
       internal: internalActivity.slice(0, 5).map((item) => `${item.id}:${item.observed_at}`).join('|'),
       connection: flowLog.filter(isConnectionFlow).slice(0, 5).map((item) => `${item.id}:${item.observed_at}:${item.src_ip}:${item.dst_ip}:${item.dst_port}`).join('|'),
       request: flowLog.filter(isRequestFlow).slice(0, 5).map((item) => `${item.id}:${item.observed_at}:${item.src_ip}:${item.dst_ip}:${item.request_count}:${item.error_count}`).join('|'),
+      http: flowLog.filter(isHTTPFlow).slice(0, 5).map((item) => `${item.id}:${item.observed_at}:${item.last_http_status}:${item.http_5xx_count}:${item.http_4xx_count}`).join('|'),
       l4: flowLog.slice(0, 5).map((item) => `${item.id}:${item.observed_at}:${item.src_ip}:${item.dst_ip}:${item.dst_port}`).join('|'),
     }
   }, [flowLog, internalActivity])
@@ -411,6 +412,7 @@ export function App() {
     { id: 'internal', label: 'Internal Activity', count: internalActivity.length },
     { id: 'connection', label: 'Connection Flow', count: flowLog.filter(isConnectionFlow).length },
     { id: 'request', label: 'Request Flow', count: flowLog.filter(isRequestFlow).length },
+    { id: 'http', label: 'HTTP Status', count: flowLog.filter(isHTTPFlow).length },
     { id: 'l4', label: 'L4 Flows', count: flowLog.length },
   ]
 

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Flow } from '../types/flow'
 import type { GraphData, GraphEdge } from '../types/graph'
-import { isConnectionFlow, isRequestFlow } from '../utils/flowFilters'
+import { isConnectionFlow, isHTTPFlow, isRequestFlow } from '../utils/flowFilters'
 import { formatUTCClock } from '../utils/time'
 import { formatBytes } from './StatCards'
 
-export type FlowTableMode = 'connection' | 'request' | 'l4'
+export type FlowTableMode = 'connection' | 'request' | 'http' | 'l4'
 type RowSeverity = 'normal' | 'warning' | 'error'
 
 const slowRTTThresholdMs = positiveNumberEnv(import.meta.env.VITE_SLOW_RTT_THRESHOLD_MS, 100)
@@ -113,6 +113,8 @@ function tableTitle(mode: FlowTableMode) {
       return ['CONNECTION FLOW', 'TC/eBPF connectivity evidence used for the idle topology line'] as const
     case 'request':
       return ['REQUEST FLOW', 'TC/eBPF request/attempt evidence used for moving topology traffic'] as const
+    case 'http':
+      return ['HTTP STATUS', 'Flows where a plaintext HTTP/1.x response status was observed'] as const
     case 'l4':
       return ['L4 FLOW', 'Raw network flow aggregates received from the VM TC/eBPF tracker'] as const
   }
@@ -130,7 +132,13 @@ function tableGuide(mode: FlowTableMode) {
       return [
         ['Source', 'Derived from connect/request counters emitted by the eBPF tracker.'],
         ['Map behavior', 'New request rows animate the same VM-to-VM edge for a short TTL.'],
-        ['Boundary', 'No HTTP method/path/status here; that requires app logs or OpenTelemetry later.'],
+        ['Status', 'HTTP status is read from plaintext HTTP/1.x responses. Method and path are not; those need app logs or OpenTelemetry.'],
+      ] as const
+    case 'http':
+      return [
+        ['Source', 'Status digits parsed in the kernel from the response. No URL, header or body is read.'],
+        ['Coverage', 'Plaintext HTTP/1.x only. TLS, HTTP/2 and HTTP/3 carry no readable status line, so those flows never appear here.'],
+        ['Reading it', 'The pill is the most recent code; the tally underneath counts every response in the same flow bucket.'],
       ] as const
     case 'l4':
       return [
@@ -223,6 +231,8 @@ function modeRows(flows: Flow[], mode: FlowTableMode) {
       return flows.filter(isConnectionFlow)
     case 'request':
       return flows.filter(isRequestFlow)
+    case 'http':
+      return flows.filter(isHTTPFlow)
     case 'l4':
       return flows
   }
