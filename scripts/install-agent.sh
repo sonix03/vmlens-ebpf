@@ -34,6 +34,14 @@ AGENT_BINARY_URL="${AGENT_BINARY_URL:-}"
 AGENT_BINARY_PATH="${AGENT_BINARY_PATH:-}"
 BPF_OBJECT_URL="${BPF_OBJECT_URL:-}"
 BPF_OBJECT_PATH="${BPF_OBJECT_PATH:-}"
+
+# Downloads are checked against the SHA256SUMS published alongside them. By
+# default the file is looked up next to the binary, which is where a GitHub
+# release puts it. A mismatch always aborts. A missing checksums file only
+# warns, so hosting the artifacts somewhere else still works; set
+# REQUIRE_CHECKSUM=true to refuse to install without one.
+CHECKSUMS_URL="${CHECKSUMS_URL:-}"
+REQUIRE_CHECKSUM="${REQUIRE_CHECKSUM:-false}"
 AGENT_VERSION="${AGENT_VERSION:-}"
 
 if [[ -z "${BACKEND_URL}" ]]; then
@@ -52,6 +60,7 @@ normalize_bool() {
 }
 
 FLOW_DEBUG="$(normalize_bool FLOW_DEBUG "${FLOW_DEBUG}")"
+REQUIRE_CHECKSUM="$(normalize_bool REQUIRE_CHECKSUM "${REQUIRE_CHECKSUM}")"
 
 export HOME="${HOME:-/root}"
 export GOPATH="${GOPATH:-/root/go}"
@@ -157,11 +166,70 @@ download_file() {
   return 1
 }
 
+checksums_file=""
+checksums_loaded=false
+
+asset_name() {
+  local url="${1%%\?*}"
+  printf '%s\n' "${url##*/}"
+}
+
+load_checksums() {
+  [[ "${checksums_loaded}" == "true" ]] && { [[ -n "${checksums_file}" ]] && return 0 || return 1; }
+  checksums_loaded=true
+  local url="${CHECKSUMS_URL}"
+  if [[ -z "${url}" ]]; then
+    local sibling="${AGENT_BINARY_URL:-${BPF_OBJECT_URL}}"
+    [[ -n "${sibling}" ]] || return 1
+    url="${sibling%/*}/SHA256SUMS"
+  fi
+  local destination="/tmp/vmlens-SHA256SUMS"
+  if ! download_file "${url}" "${destination}" 2>/dev/null; then
+    return 1
+  fi
+  checksums_file="${destination}"
+}
+
+# Only downloads are verified. A local path is something the operator already
+# has in hand, and checking it against a checksums file fetched over the network
+# would prove nothing they do not already control.
+verify_download() {
+  local file="$1"
+  local asset="$2"
+  if ! load_checksums; then
+    if [[ "${REQUIRE_CHECKSUM}" == "true" ]]; then
+      echo "REQUIRE_CHECKSUM=true but no SHA256SUMS could be fetched" >&2
+      exit 1
+    fi
+    echo "Agent installer: no SHA256SUMS available, installing ${asset} unverified" >&2
+    return 0
+  fi
+  local expected actual
+  expected="$(awk -v name="${asset}" '$2 == name || $2 == "*" name { print $1; exit }' "${checksums_file}")"
+  if [[ -z "${expected}" ]]; then
+    if [[ "${REQUIRE_CHECKSUM}" == "true" ]]; then
+      echo "REQUIRE_CHECKSUM=true but ${asset} is not listed in SHA256SUMS" >&2
+      exit 1
+    fi
+    echo "Agent installer: ${asset} is not listed in SHA256SUMS, installing unverified" >&2
+    return 0
+  fi
+  actual="$(sha256sum "${file}" | awk '{print $1}')"
+  if [[ "${expected}" != "${actual}" ]]; then
+    echo "checksum mismatch for ${asset}" >&2
+    echo "  expected ${expected}" >&2
+    echo "  actual   ${actual}" >&2
+    exit 1
+  fi
+  echo "Agent installer: checksum verified for ${asset}" >&2
+}
+
 install_agent_prebuilt() {
   local source="${AGENT_BINARY_PATH}"
   if [[ -n "${AGENT_BINARY_URL}" ]]; then
     source="/tmp/vmlens-agent.prebuilt"
     download_file "${AGENT_BINARY_URL}" "${source}"
+    verify_download "${source}" "$(asset_name "${AGENT_BINARY_URL}")"
   fi
   [[ -n "${source}" ]] || return 1
   [[ -r "${source}" ]] || { echo "agent binary not found: ${source}" >&2; return 1; }
@@ -181,6 +249,7 @@ install_bpf_prebuilt() {
   if [[ -n "${BPF_OBJECT_URL}" ]]; then
     source="/tmp/flow_tracker.bpf.o.prebuilt"
     download_file "${BPF_OBJECT_URL}" "${source}"
+    verify_download "${source}" "$(asset_name "${BPF_OBJECT_URL}")"
   fi
   [[ -n "${source}" ]] || return 1
   [[ -r "${source}" ]] || { echo "eBPF object not found: ${source}" >&2; return 1; }
