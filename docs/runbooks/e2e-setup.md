@@ -4,7 +4,7 @@ VMLens Simple Setup
 Goal:
 - Local laptop runs dashboard, backend, and database with Docker.
 - Cloud VMs run the VMLens agent.
-- VM agent uses release v2.7 prebuilt binary.
+- VM agent uses the latest released prebuilt binary.
 - VM does not need git clone or compile.
 
 Architecture:
@@ -66,17 +66,23 @@ Expected:
 Run on each VM:
 
 curl -fsSL -o /tmp/vmlens-install-agent.sh \
-  https://github.com/sonix03/vmlens-ebpf/releases/download/v2.7/install-agent.sh
+  https://github.com/sonix03/vmlens-ebpf/releases/latest/download/install-agent.sh
 
 chmod +x /tmp/vmlens-install-agent.sh
 
+On an arm64 VM, replace amd64 with arm64 in both asset names below.
+
+REQUIRE_CHECKSUM=true refuses to install if the published SHA256SUMS cannot be
+fetched or does not match. Every GitHub release carries one, so leave it on.
+
 sudo env \
   INSTALL_MODE=prebuilt \
+  REQUIRE_CHECKSUM=true \
   BACKEND_URL=http://127.0.0.1:18080 \
   MOCK_MODE=false \
   FLOW_INTERVAL=1s \
-  AGENT_BINARY_URL=https://github.com/sonix03/vmlens-ebpf/releases/download/v2.7/vmlens-agent-linux-amd64 \
-  BPF_OBJECT_URL=https://github.com/sonix03/vmlens-ebpf/releases/download/v2.7/flow_tracker-linux-amd64.bpf.o \
+  AGENT_BINARY_URL=https://github.com/sonix03/vmlens-ebpf/releases/latest/download/vmlens-agent-linux-amd64 \
+  BPF_OBJECT_URL=https://github.com/sonix03/vmlens-ebpf/releases/latest/download/flow_tracker-linux-amd64.bpf.o \
   bash /tmp/vmlens-install-agent.sh
 
 Check:
@@ -87,9 +93,19 @@ sudo journalctl -u vmlens-agent -n 50 --no-pager
 
 Expected:
 
+Agent installer: checksum verified for vmlens-agent-linux-amd64
+Agent installer: checksum verified for flow_tracker-linux-amd64.bpf.o
 active
 registered agent=...
 eBPF collector loaded object=/usr/lib/vmlens/flow_tracker.bpf.o
+
+Confirm which release is actually running, from local:
+
+curl -s http://127.0.0.1:8080/api/agents
+
+Every agent must report agent_version matching the release you installed. A
+value of "dev" means the binary was built outside the release path, so it is not
+the release you think it is.
 
 
 5. Local: verify VM nodes
@@ -148,7 +164,7 @@ internal activity shows VM-to-VM communication
 
 Example:
 
-testing-a-2 (10.20.20.130) -> testing-a-1 (10.20.20.199):8081 tcp
+testing-a-1 (10.20.20.130) -> testing-a-2 (10.20.20.199):8081 tcp
 
 
 8. Stop
@@ -193,7 +209,7 @@ Then repeat from step 1.
 
 Release:
 
-https://github.com/sonix03/vmlens-ebpf/releases/tag/v2.7
+https://github.com/sonix03/vmlens-ebpf/releases/latest
 
 Assets used:
 
