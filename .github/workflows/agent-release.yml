@@ -11,7 +11,22 @@ permissions:
 
 jobs:
   build-agent:
-    runs-on: ubuntu-24.04
+    # Each arch builds on its own runner. Cross-compiling the eBPF object is not
+    # an option: vmlinux.h is dumped from the runner's own kernel BTF, and
+    # struct pt_regs differs per architecture, so an arm64 object built against
+    # an x86 header would read the wrong registers.
+    runs-on: ${{ matrix.runner }}
+    # amd64 is the proven path and must always publish. arm64 is additional, so
+    # a failure there cannot hold back the release.
+    continue-on-error: ${{ matrix.arch == 'arm64' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -50,20 +65,56 @@ jobs:
           bpftool version || true
           ls -l /usr/include/bpf/bpf_helpers.h agent/ebpf/include/vmlinux_fallback.h
           ls -l /sys/kernel/btf/vmlinux || true
-          VERSION="${GITHUB_REF_NAME:-dev}" TARGET_ARCHES="amd64" CLANG_BIN=clang-18 bash -x scripts/build-agent-release.sh
+          VERSION="${GITHUB_REF_NAME:-dev}" TARGET_ARCHES="${{ matrix.arch }}" CLANG_BIN=clang-18 bash -x scripts/build-agent-release.sh
 
+      - name: Verify the version stamp landed in the binary
+        run: |
+          set -eu
+          VERSION="${GITHUB_REF_NAME:-dev}"
+          BINARY="dist/agent/${VERSION}/vmlens-agent-linux-${{ matrix.arch }}"
+          # An agent that cannot report which release it is makes every field
+          # report ambiguous, so a missing stamp fails the build rather than
+          # shipping quietly.
+          strings "${BINARY}" | grep -qF "${VERSION}" \
+            || { echo "version stamp ${VERSION} not found in ${BINARY}" >&2; exit 1; }
+          echo "version stamp ${VERSION} present in ${BINARY}"
+
+      # The per-arch SHA256SUMS is deliberately not published from here. Each
+      # runner only sees its own arch, so two jobs uploading that name would
+      # leave the release holding whichever finished last, listing half the
+      # assets. The publish job regenerates it over everything instead.
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vmlens-agent-artifacts
+          name: vmlens-agent-artifacts-${{ matrix.arch }}
           path: dist/agent/**
 
+  publish:
+    needs: build-agent
+    # always(): arm64 is allowed to fail, and the amd64 assets must still ship.
+    if: always() && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Collect every arch that built
+        uses: actions/download-artifact@v4
+        with:
+          pattern: vmlens-agent-artifacts-*
+          merge-multiple: true
+          path: dist/agent
+
+      - name: Regenerate SHA256SUMS over the assets that exist
+        run: |
+          set -eu
+          cd "dist/agent/${GITHUB_REF_NAME}"
+          test -f vmlens-agent-linux-amd64 || { echo "amd64 agent binary missing; refusing to publish" >&2; exit 1; }
+          sha256sum install-agent.sh vmlens-agent-linux-* flow_tracker-linux-*.bpf.o >SHA256SUMS
+          cat SHA256SUMS
+
       - name: Upload GitHub release assets
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/agent/${{ github.ref_name }}/vmlens-agent-linux-amd64
-            dist/agent/${{ github.ref_name }}/flow_tracker-linux-amd64.bpf.o
+            dist/agent/${{ github.ref_name }}/vmlens-agent-linux-*
+            dist/agent/${{ github.ref_name }}/flow_tracker-linux-*.bpf.o
             dist/agent/${{ github.ref_name }}/install-agent.sh
             dist/agent/${{ github.ref_name }}/SHA256SUMS
