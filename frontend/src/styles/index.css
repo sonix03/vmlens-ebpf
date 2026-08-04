@@ -1513,3 +1513,91 @@ text.graph-edge-muted {
   height: 96px;
   border-right: 0 !important;
 }
+
+
+/* ---------------------------------------------------------------------------
+   Circular nodes. The pill shape meant edges were anchored to a bounding box
+   the node did not actually fill, so lines ended in empty space near the
+   rounded ends. A circle has one radius from every angle, so the anchor is
+   exact and the line always meets the border.
+   --------------------------------------------------------------------------- */
+
+.graph-node-button {
+  width: 96px;
+  height: 96px;
+  min-height: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border-width: 2px;
+  overflow: visible;
+}
+
+.graph-node-button:hover {
+  transform: none;
+}
+
+.vm-node-glyph {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+
+.vm-node-glyph .vm-node-icon {
+  width: 34px;
+  height: 34px;
+  flex: none;
+}
+
+.vm-node-glyph .vm-node-icon svg {
+  width: 34px;
+  height: 34px;
+}
+
+/* Status rides the rim so it never competes with the icon for the middle. */
+.vm-node-badge {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: hsl(var(--orbit-background));
+}
+
+/* The label sits outside the circle so the hit area stays perfectly round. */
+.vm-node-label {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 190px;
+  margin-top: 9px;
+  display: grid;
+  gap: 2px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  text-align: center;
+}
+
+.vm-node-label strong {
+  overflow: hidden;
+  color: hsl(var(--orbit-foreground));
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vm-node-label small {
+  overflow: hidden;
+  color: hsl(var(--orbit-muted));
+  font: 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

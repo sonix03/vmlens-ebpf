@@ -17,8 +17,10 @@ interface Props {
 const statusColors: Record<string, string> = {
   online: '#55a979', stale: '#c5964b', offline: '#6b7280', external: '#608fbd', unknown: '#8b949e',
 }
-const nodeWidth = 270
-const nodeHeight = 64
+// A circle is the one shape whose edge point is exact from every angle, so the
+// line always lands on the border instead of somewhere inside or outside it.
+const nodeSize = 96
+const nodeRadius = nodeSize / 2
 const canvasPadding = 90
 const minCanvasWidth = 3200
 const minCanvasHeight = 2000
@@ -78,27 +80,21 @@ function positiveNumberEnv(raw: unknown, fallback: number) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
 }
 
-function curvedPath(source: Point, target: Point) {
-  const dx = target.x - source.x
-  const dy = target.y - source.y
-  const length = Math.hypot(dx, dy) || 1
-  const curve = Math.min(40, Math.max(10, length * 0.04))
-  const mid = {
-    x: (source.x + target.x) / 2 - (dy / length) * curve,
-    y: (source.y + target.y) / 2 + (dx / length) * curve,
-  }
-  return `M ${source.x} ${source.y} Q ${mid.x} ${mid.y} ${target.x} ${target.y}`
+function straightPath(source: Point, target: Point) {
+  return `M ${source.x} ${source.y} L ${target.x} ${target.y}`
 }
 
+// Walk out from the centre along the direction of travel by exactly the node
+// radius, plus a small gap so the stroke meets the border rather than hiding
+// under it.
 function edgePoint(from: Point, to: Point) {
   const dx = to.x - from.x
   const dy = to.y - from.y
-  const absDx = Math.abs(dx) || 1
-  const absDy = Math.abs(dy) || 1
-  const scale = Math.min((nodeWidth / 2) / absDx, (nodeHeight / 2) / absDy)
+  const length = Math.hypot(dx, dy) || 1
+  const offset = nodeRadius + 4
   return {
-    x: from.x + dx * scale,
-    y: from.y + dy * scale,
+    x: from.x + (dx / length) * offset,
+    y: from.y + (dy / length) * offset,
   }
 }
 
@@ -197,13 +193,18 @@ function nodeSortKey(node: GraphNode) {
   return `${node.ip || '999.999.999.999'}-${node.label}-${node.id}`
 }
 
+// Spacing is set by the label under each node, not the circle: the label is the
+// widest part, so columns have to clear it rather than the 96px node.
+const columnSpacing = 430
+const rowSpacing = 310
+
 function positionForSlot(slot: number, total: number) {
-  if (total === 1) return { x: canvasPadding + 330, y: canvasPadding + 230 }
-  if (total === 2) return { x: canvasPadding + slot * 560, y: canvasPadding + 240 }
+  if (total === 1) return { x: canvasPadding + columnSpacing, y: canvasPadding + 220 }
+  if (total === 2) return { x: canvasPadding + slot * (columnSpacing + 120), y: canvasPadding + 220 }
   const columns = Math.min(3, Math.ceil(Math.sqrt(total)))
   const column = slot % columns
   const row = Math.floor(slot / columns)
-  return { x: canvasPadding + column * 470, y: canvasPadding + row * 240 }
+  return { x: canvasPadding + column * columnSpacing, y: canvasPadding + row * rowSpacing }
 }
 
 function formatCompactBytes(value: number) {
@@ -406,7 +407,7 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect, selectedNod
       color,
       status,
       position,
-      center: { x: position.x + nodeWidth / 2, y: position.y + nodeHeight / 2 },
+      center: { x: position.x + nodeRadius, y: position.y + nodeRadius },
     }
   }), [visibleGraphNodes])
   const nodeByID = useMemo(() => new Map(nodes.map((item) => [item.node.id, item])), [nodes])
@@ -602,7 +603,7 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect, selectedNod
         hasForward: connected ? relationship.hasForward : false,
         hasReverse: connected ? relationship.hasReverse : false,
         width: Math.min(4, 1.25 + relationship.weight * 0.4),
-        path: curvedPath(start, end),
+        path: straightPath(start, end),
         label,
         labelX: (start.x + end.x) / 2,
         labelY: (start.y + end.y) / 2 - 10,
@@ -630,8 +631,8 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect, selectedNod
   }
 
   const canvas = useMemo(() => {
-    const maxX = Math.max(...nodes.map((item) => item.position.x + nodeWidth + canvasPadding), minCanvasWidth)
-    const maxY = Math.max(...nodes.map((item) => item.position.y + nodeHeight + canvasPadding), minCanvasHeight)
+    const maxX = Math.max(...nodes.map((item) => item.position.x + nodeSize + canvasPadding), minCanvasWidth)
+    const maxY = Math.max(...nodes.map((item) => item.position.y + nodeSize + canvasPadding + 46), minCanvasHeight)
     return { width: maxX, height: maxY }
   }, [nodes])
 
@@ -653,21 +654,36 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect, selectedNod
       }}
     >
       <div className="graph-grid" />
-      <svg className="graph-edges" viewBox={`0 0 ${canvas.width} ${canvas.height}`} aria-hidden="true">
+      {/*
+        The SVG must map one user unit to one CSS pixel, exactly like the nodes,
+        which are placed with absolute left/top. Leaving it at width:100% let the
+        default xMidYMid meet centre the viewBox whenever the map stretched past
+        the canvas size, which is what browser zoom-out does: the edges drifted
+        sideways while the nodes stayed put.
+      */}
+      <svg
+        className="graph-edges"
+        width={canvas.width}
+        height={canvas.height}
+        viewBox={`0 0 ${canvas.width} ${canvas.height}`}
+        preserveAspectRatio="xMinYMin meet"
+        style={{ width: canvas.width, height: canvas.height }}
+        aria-hidden="true"
+      >
         <defs>
-          <marker id="edge-arrow-active" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
+          <marker id="edge-arrow-active" markerUnits="userSpaceOnUse" markerWidth="7" markerHeight="7" viewBox="0 0 10 10" refX="9" refY="5" orient="auto-start-reverse">
             <path d="M 1 1 L 9 5 L 1 9 z" fill="#6fa88b" />
           </marker>
-          <marker id="edge-arrow-idle" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
+          <marker id="edge-arrow-idle" markerUnits="userSpaceOnUse" markerWidth="7" markerHeight="7" viewBox="0 0 10 10" refX="9" refY="5" orient="auto-start-reverse">
             <path d="M 1 1 L 9 5 L 1 9 z" fill="#5fae7e" />
           </marker>
-          <marker id="edge-arrow-slow" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
+          <marker id="edge-arrow-slow" markerUnits="userSpaceOnUse" markerWidth="7" markerHeight="7" viewBox="0 0 10 10" refX="9" refY="5" orient="auto-start-reverse">
             <path d="M 1 1 L 9 5 L 1 9 z" fill="#d9ad55" />
           </marker>
-          <marker id="edge-arrow-reachability" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
+          <marker id="edge-arrow-reachability" markerUnits="userSpaceOnUse" markerWidth="7" markerHeight="7" viewBox="0 0 10 10" refX="9" refY="5" orient="auto-start-reverse">
             <path d="M 1 1 L 9 5 L 1 9 z" fill="#79add1" />
           </marker>
-          <marker id="edge-arrow-failed" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse">
+          <marker id="edge-arrow-failed" markerUnits="userSpaceOnUse" markerWidth="7" markerHeight="7" viewBox="0 0 10 10" refX="9" refY="5" orient="auto-start-reverse">
             <path d="M 1 1 L 9 5 L 1 9 z" fill="#e15757" />
           </marker>
         </defs>
@@ -742,15 +758,14 @@ export function GraphView({ graph, onNodeSelect, onConnectionSelect, selectedNod
         style={{ left: position.x, top: position.y, borderColor: node.status === 'online' ? color : `${color}80` }}
         onClick={() => onNodeSelect(node)}
       >
-        <div className="vm-node-content">
+        <span className="vm-node-glyph">
           {node.type === 'external' ? <ExternalIcon /> : <VMIcon />}
-          <span className="vm-node-text">
-            <strong>{node.label}</strong>
-            <small>{node.ip || 'no IP'} · {status}</small>
-            <em>{node.role || node.type || 'host'}</em>
-          </span>
-          <NodeStatusIcon status={status} />
-        </div>
+          <span className="vm-node-badge"><NodeStatusIcon status={status} /></span>
+        </span>
+        <span className="vm-node-label">
+          <strong>{node.label}</strong>
+          <small>{node.ip || 'no IP'}</small>
+        </span>
       </button>)}
     </div>
     <div className="graph-controls" aria-label="Map controls">
