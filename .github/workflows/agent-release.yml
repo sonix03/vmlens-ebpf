@@ -51,6 +51,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-18 llvm-18 libbpf-dev linux-tools-common
+          # linux-tools-common only ships the wrapper, which refuses to run when
+          # no bpftool matches the running kernel, and the kernel-specific and
+          # azure packages do not exist for every runner. linux-tools-generic
+          # carries a real bpftool binary, which is all the build needs: it only
+          # dumps BTF, it does not talk to the running kernel.
+          sudo apt-get install -y linux-tools-generic || true
           sudo apt-get install -y "linux-tools-$(uname -r)" "linux-cloud-tools-$(uname -r)" || true
           sudo apt-get install -y linux-tools-azure linux-cloud-tools-azure || true
           BPFTOOL_PATH="$(find /usr/lib -path '*linux*tools*' -name bpftool -type f -executable 2>/dev/null | sort -Vr | head -n1 || true)"

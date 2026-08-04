@@ -40,6 +40,7 @@ tmp_dir="$(mktemp -d)"
 trap 'rm -rf "${tmp_dir}"' EXIT
 
 fallback_vmlinux="${repo_dir}/agent/ebpf/include/vmlinux_fallback.h"
+used_fallback=false
 if [[ -n "${VMLINUX_HEADER:-}" ]]; then
   [[ -r "${VMLINUX_HEADER}" ]] || { echo "VMLINUX_HEADER is not readable: ${VMLINUX_HEADER}" >&2; exit 1; }
   cp "${VMLINUX_HEADER}" "${tmp_dir}/vmlinux.h"
@@ -48,6 +49,7 @@ elif [[ -n "${bpftool_bin}" && -r /sys/kernel/btf/vmlinux ]]; then
 elif [[ -r "${fallback_vmlinux}" ]]; then
   echo "using fallback vmlinux header: ${fallback_vmlinux}" >&2
   cp "${fallback_vmlinux}" "${tmp_dir}/vmlinux.h"
+  used_fallback=true
 else
   echo "bpftool plus kernel BTF, VMLINUX_HEADER, or ${fallback_vmlinux} is required" >&2
   exit 1
@@ -59,6 +61,16 @@ for arch in ${target_arches}; do
     arm64) goarch=arm64; bpf_arch=arm64 ;;
     *) echo "unsupported arch: ${arch}; use amd64 or arm64" >&2; exit 1 ;;
   esac
+
+  # The fallback header only describes x86. libbpf's kprobe macros cast the
+  # context to struct pt_regs there but to struct user_pt_regs on arm64, which
+  # the fallback does not define, so the compile dies thirteen macro expansions
+  # deep. Say so here instead.
+  if [[ "${used_fallback}" == "true" && "${bpf_arch}" != "x86" ]]; then
+    echo "cannot build ${arch}: the fallback vmlinux header is x86-only" >&2
+    echo "install bpftool so kernel BTF can be dumped, or set VMLINUX_HEADER to a ${arch} vmlinux.h" >&2
+    exit 1
+  fi
 
   echo "building vmlens-agent linux/${goarch}"
   (
