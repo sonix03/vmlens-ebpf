@@ -31,18 +31,6 @@ struct {
     __type(value, struct flow_event);
 } pending_io SEC(".maps");
 
-/*
- * The socket behind an in-flight sendmsg/recvmsg, keyed by pid_tgid alongside
- * pending_io. The return probe needs it to settle application delay at the
- * moment data actually arrived rather than when the call was entered.
- */
-struct {
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __uint(max_entries, 32768);
-    __type(key, __u64);
-    __type(value, __u64);
-} pending_sock SEC(".maps");
-
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
     __uint(max_entries, CAPTURE_STAT_MAX);

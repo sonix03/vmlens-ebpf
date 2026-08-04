@@ -150,10 +150,16 @@ func connectionAttachments() []kprobeAttachment {
 	}
 }
 
+// tcpMetricAttachments are the probes that supplement whichever capture path is
+// active. They carry no byte or packet accounting, so they are safe to attach in
+// TC mode where the TC hook already owns that.
 func tcpMetricAttachments() []kprobeAttachment {
 	return []kprobeAttachment{
 		{"trace_tcp_rtt", "tcp_rcv_established", false, false},
 		{"trace_tcp_retransmit", "tcp_retransmit_skb", false, false},
+		{"trace_tcp_delay_send", "tcp_sendmsg", false, false},
+		{"trace_tcp_delay_recv", "tcp_recvmsg", false, false},
+		{"trace_tcp_delay_recv_ret", "tcp_recvmsg", true, false},
 	}
 }
 

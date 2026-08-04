@@ -25,6 +25,18 @@ struct {
     __type(value, __u64);
 } app_delay_start SEC(".maps");
 
+/*
+ * The socket a receive is running on, keyed by pid_tgid. The return probe needs
+ * it because only there is it known that response bytes actually arrived, and
+ * the kretprobe has no access to the original arguments.
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 32768);
+    __type(key, __u64);
+    __type(value, __u64);
+} app_delay_recv_sock SEC(".maps");
+
 /* Called when the socket sends. Records the start of an outstanding request. */
 static __always_inline void mark_request_sent(struct sock *sk)
 {

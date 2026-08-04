@@ -6,7 +6,6 @@
 #include "../../../../../shared/bpf/flow_maps.h"
 #include "../../../../traffic/bytes/bytes.bpf.h"
 #include "../../../../classification/ports.bpf.h"
-#include "../../../application/delay/delay.bpf.h"
 #include "request_response.bpf.h"
 
 static __always_inline void socket_metadata(struct flow_event *event, struct sock *sk,
@@ -49,17 +48,6 @@ static __always_inline int remember_io(struct sock *sk, __u8 protocol, __u8 dire
     __u64 key = bpf_get_current_pid_tgid();
     struct flow_event event = {};
     socket_metadata(&event, sk, protocol, direction);
-
-    // Application delay is a TCP request/response notion. A UDP socket can be
-    // unconnected and shared across peers, so timing it would mix conversations.
-    if (protocol == IPPROTO_TCP_VALUE) {
-        __u64 sock_key = (__u64)sk;
-        bpf_map_update_elem(&pending_sock, &key, &sock_key, BPF_ANY);
-        if (direction == DIR_EGRESS) {
-            mark_request_sent(sk);
-        }
-    }
-
     return bpf_map_update_elem(&pending_io, &key, &event, BPF_ANY);
 }
 
@@ -67,28 +55,18 @@ static __always_inline int finish_io(struct pt_regs *ctx)
 {
     __u64 key = bpf_get_current_pid_tgid();
     struct flow_event *saved = bpf_map_lookup_elem(&pending_io, &key);
-    __u64 *sock_key = bpf_map_lookup_elem(&pending_sock, &key);
     // TCP/UDP sendmsg and recvmsg return int. Ignore stale upper register bits.
     int result = (int)PT_REGS_RC(ctx);
-    if (!saved) {
-        bpf_map_delete_elem(&pending_sock, &key);
-        return 0;
-    }
+    if (!saved) return 0;
     if (result > 0) {
         struct flow_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
         if (event) {
             __builtin_memcpy(event, saved, sizeof(*event));
             set_bytes(event, (__u64)result);
-            // Settle the delay here: this is the point where the response bytes
-            // are known to have arrived, not merely where the call was entered.
-            if (sock_key && saved->direction == DIR_INGRESS) {
-                event->app_delay_us = take_response_delay_us((struct sock *)*sock_key);
-            }
             bpf_ringbuf_submit(event, 0);
         }
     }
     bpf_map_delete_elem(&pending_io, &key);
-    bpf_map_delete_elem(&pending_sock, &key);
     return 0;
 }
 
