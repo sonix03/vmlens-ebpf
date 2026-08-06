@@ -62,6 +62,7 @@ contract lives in `contracts/`; these are the ones you cannot skip.
 | `contracts/telemetry-schema.md` | Exact JSON per hop, plus consumer stability rules |
 | `contracts/probing.md` | Active connectivity probing |
 | `contracts/inventory-cloud-ui.md` | Inventory format, cloud data, UI state mapping |
+| `contracts/data-schema.md` | Postgres tables, relationships, lifecycle, and which tables are unwritten |
 | `contracts/known-gaps.md` | Where the implementation is approximate, and what is dead code |
 
 **If you change metric semantics, update the contract in the same change.** A

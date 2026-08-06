@@ -16,7 +16,8 @@ number means before arguing about a graph.
 | 2 | `telemetry-schema.md` | The exact JSON on each hop, field by field, plus the stability rules for consumers. |
 | 3 | `probing.md` | Active connectivity probing: policy, results, and how to read them. |
 | 4 | `inventory-cloud-ui.md` | Static inventory format, future cloud-provider data, and UI state mapping. |
-| 5 | `known-gaps.md` | Where the current implementation is approximate, and what is dead code rather than a working feature. |
+| 5 | `data-schema.md` | Every control-plane table: what writes it, what a row means, and which tables are declared but never written. |
+| 6 | `known-gaps.md` | Where the current implementation is approximate, and what is dead code rather than a working feature. |
 
 ## Source categories
 
