@@ -11,6 +11,8 @@ orbit-critical-probing.md    production probing and retention model
 prebuilt-agent.md            release artifact and VM install flow
 privacy.md                   privacy and data boundary
 project-structure.md         repository layout
+schema/                      generated DBML for dbdiagram.io (make schema-dbml)
+                             vmlens.dbml = full, vmlens-minimal.dbml = proposal
 screenshot/                  documentation screenshots
 setup/                       local, cloud and OpenStack setup guides
 runbooks/                    copy-paste command flows
