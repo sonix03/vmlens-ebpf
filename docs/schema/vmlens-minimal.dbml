@@ -1,0 +1,325 @@
+Project "vmlens-minimal" {
+  database_type: 'PostgreSQL'
+  Note: '''
+    MINIMAL PROFILE - a proposal, not a description of the database.
+
+    This is the schema VMLens needs to answer its product question: "is VM A
+    connected to VM B, and is that path healthy?" It is the full schema minus
+    the tables nothing writes and the columns whose metrics cost more than they
+    are worth. See contracts/data-schema.md for the reasoning; each removal is
+    commented at the point it was made.
+
+    The matching capture profile is 4 eBPF attachments:
+      tcx/ingress, tcx/egress    who talks to whom, bytes, SYN, RST
+      kprobe/tcp_rcv_established RTT
+      kprobe/tcp_retransmit_skb  retransmissions
+    plus the userspace connectivity probe.
+
+    Generating this file changes nothing in Postgres. The columns still exist
+    until a migration removes them.
+  '''
+}
+
+// ======================================================================
+// Tables left out of this profile
+// ======================================================================
+//   cloud_public_ips - cloud provider integration is a noop; no writer exists
+//   cloud_firewall_rules - cloud provider integration is a noop; no writer exists
+//   cloud_routes - cloud provider integration is a noop; no writer exists
+//   cloud_network_policies - cloud provider integration is a noop; no writer exists
+//   connection_intents - intent modelling not built; no writer exists
+//   connection_configurations - intent modelling not built; no writer exists
+//   connection_change_events - no reader and no writer anywhere
+
+// ======================================================================
+// Enums, promoted from CHECK constraints
+// ======================================================================
+
+Enum "direction" {
+  "ingress"
+  "egress"
+}
+
+Enum "flow_scope" {
+  "internal_same_tenant"
+  "internal_cross_tenant"
+  "unknown_internal"
+  "external_public"
+  "external_private"
+  "unknown"
+}
+
+Enum "node_status" {
+  "online"
+  "stale"
+  "offline"
+}
+
+Enum "protocol" {
+  "tcp"
+  "udp"
+  "icmp"
+}
+
+// ======================================================================
+// Identity (agent + inventory)
+// ======================================================================
+
+Table "agents" [headercolor: #3498db] {
+  "id" text [pk, not null, note: 'Agent-supplied identifier. Upsert key.']
+  "vm_id" text
+  "hostname" text [not null]
+  "machine_id" text [note: 'Strongest re-identification key across agent reinstalls.']
+  "os" text
+  "kernel" text
+  "agent_version" text
+  "environment" text
+  "status" node_status [not null, default: 'online', note: 'Derived by the status sweep: online <1m, stale <5m, else offline.']
+  "first_seen" timestamptz [not null, default: `now()`]
+  "last_seen" timestamptz [not null, default: `now()`, note: 'Bumped by heartbeat AND by every accepted flow ingest.']
+  "project_id" text
+
+  Indexes {
+    last_seen [type: btree, name: "idx_agents_last_seen"]
+    machine_id [type: btree, name: "idx_agents_machine_id"]
+    vm_id [type: btree, name: "idx_agents_vm_id"]
+  }
+  Note: 'One row per installed agent process. id is chosen by the agent, not the backend. Written by /api/agents/register and /heartbeat. status is derived by the sweep, never sent by the agent.'
+}
+
+Table "vms" [headercolor: #3498db] {
+  "id" text [pk, not null]
+  "name" text [not null]
+  "tenant_id" text [note: 'Drives internal_same_tenant vs internal_cross_tenant. A NULL tenant can never produce a same-tenant flow.']
+  "private_ip" inet [note: 'Primary observed address. Used to match the inventory entry.']
+  "public_ip" inet
+  "mac_address" text
+  "host_id" text
+  "role" text
+  "discovered_by" text [not null, default: 'agent', note: 'Set to agent for self-registered VMs. Only those are eligible for VM_DELETE_AFTER reaping.']
+  "agent_id" text
+  "machine_id" text
+  "status" node_status [not null, default: 'online', note: 'Derived by the status sweep, same windows as agents.status.']
+  "first_seen" timestamptz [not null, default: `now()`]
+  "last_seen" timestamptz [not null, default: `now()`]
+  "created_at" timestamptz [not null, default: `now()`]
+  "project_id" text
+  "region" text
+  "zone" text
+  "environment" text
+  "owner" text
+  "network_id" text
+  "subnet_id" text
+  "host_type" text [note: 'Inventory-assigned host classification.']
+
+  Indexes {
+    agent_id [type: btree, name: "idx_vms_agent_id"]
+    machine_id [type: btree, name: "idx_vms_machine_id"]
+    (tenant_id, project_id, status, last_seen) [type: btree, name: "idx_vms_ownership"]
+    private_ip [type: btree, name: "idx_vms_private_ip"]
+    public_ip [type: btree, name: "idx_vms_public_ip"]
+    status [type: btree, name: "idx_vms_status"]
+  }
+  Note: 'One row per known VM. Created by agent registration (discovered_by=agent) and enriched from configs/vms.local by IP match. Inventory values win over self-reported ones.'
+}
+
+Table "vm_interfaces" [headercolor: #3498db] {
+  "id" uuid [pk, not null, default: `gen_random_uuid()`]
+  "vm_id" text [not null]
+  "interface_name" text [not null]
+  "ip_address" inet
+  "mac_address" text
+  "created_at" timestamptz [not null, default: `now()`]
+  "updated_at" timestamptz [not null, default: `now()`]
+
+  Indexes {
+    (vm_id, interface_name, ip_address, mac_address) [type: btree, unique, name: "uq_vm_interfaces_identity"]
+    ip_address [type: btree, name: "idx_vm_interfaces_ip_address"]
+    mac_address [type: btree, name: "idx_vm_interfaces_mac_address"]
+    vm_id [type: btree, name: "idx_vm_interfaces_vm_id"]
+  }
+  Note: 'Every NIC an agent reported. This is the lookup table that turns a peer IP into a VM ID, so an unreported interface makes that path look external. Unique on (vm_id, interface_name, ip_address, mac_address) NULLS NOT DISTINCT.'
+}
+
+// ======================================================================
+// Observed traffic (eBPF)
+// ======================================================================
+
+Table "network_flows" [headercolor: #16a085] {
+  "id" uuid [pk, not null, default: `gen_random_uuid()`]
+  "agent_id" text
+  "src_vm_id" text
+  "dst_vm_id" text
+  "src_ip" inet [not null, note: 'Always the observing VM, never simply the packet header source.']
+  "dst_ip" inet [not null, note: 'The peer.']
+  "src_port" int4 [note: 'First-seen only. NOT part of the bucket key and not meaningful for display.']
+  "dst_port" int4 [note: 'The peer port. On an ingress flow this is the client ephemeral port; resolve service_port for display.']
+  "protocol" protocol [not null]
+  "direction" direction [not null, default: 'egress', note: 'Which way the bytes moved relative to the observing NIC.']
+  "scope" flow_scope [not null, note: 'Part of the bucket key, so a peer that later registers as a VM starts a NEW bucket.']
+  "bytes_sent" int8 [not null, default: 0]
+  "bytes_received" int8 [not null, default: 0]
+  // dropped: packets - adds nothing over bytes for topology or health
+  "connection_count" int8 [not null, default: 0]
+  "first_seen" timestamptz [not null]
+  "last_seen" timestamptz [not null]
+  "interface_name" text
+  "created_at" timestamptz [not null, default: `now()`]
+  "observed_at" timestamptz [not null, default: `now()`, note: 'When the control plane last accepted an update. Use this for freshness.']
+  "request_count" int8 [not null, default: 0]
+  "error_count" int8 [not null, default: 0, note: 'TCP RST count, cumulative.']
+  "last_error_at" timestamptz [note: 'NULL until the first non-zero error window arrives.']
+  "retransmission_count" int8 [not null, default: 0]
+  "avg_rtt_ms" float8 [not null, default: 0, note: 'Kernel TCP RTT, smoothed as (old+new)/2. 0 means no sample, not 0 ms.']
+  // dropped: avg_app_delay_ms - needs 3 kprobes on the hottest TCP syscalls, and the number is wrong for multiplexed protocols
+  "http_1xx_count" int8 [not null, default: 0]
+  "http_2xx_count" int8 [not null, default: 0]
+  "http_3xx_count" int8 [not null, default: 0]
+  "http_4xx_count" int8 [not null, default: 0]
+  "http_5xx_count" int8 [not null, default: 0, note: 'Always 0 for TLS, which is not the same as no errors.']
+  "last_http_status" int4 [note: 'Plaintext HTTP/1.x only, derived in-kernel from the status line. No payload is stored.']
+
+  Indexes {
+    agent_id [type: btree, name: "idx_network_flows_agent_id"]
+    dst_ip [type: btree, name: "idx_network_flows_dst_ip"]
+    dst_vm_id [type: btree, name: "idx_network_flows_dst_vm_id"]
+    observed_at [type: btree, name: "idx_network_flows_http_5xx"]
+    last_error_at [type: btree, name: "idx_network_flows_last_error_at"]
+    last_seen [type: btree, name: "idx_network_flows_last_seen"]
+    observed_at [type: btree, name: "idx_network_flows_observed_at"]
+    protocol [type: btree, name: "idx_network_flows_protocol"]
+    scope [type: btree, name: "idx_network_flows_scope"]
+    src_ip [type: btree, name: "idx_network_flows_src_ip"]
+    src_vm_id [type: btree, name: "idx_network_flows_src_vm_id"]
+  }
+  Note: 'Aggregate flow state, one row per flow bucket, updated in place. Counters here are CUMULATIVE since first_seen, while the agent posts window deltas. No unique index: the bucket is found by SELECT ... FOR UPDATE on (src_vm_id, dst_vm_id, src_ip, dst_ip, protocol, dst_port, scope, direction) under a pg_advisory_xact_lock. Rows are never deleted.'
+}
+
+Table "flow_observations" [headercolor: #16a085] {
+  "id" uuid [pk, not null, default: `gen_random_uuid()`]
+  "flow_id" uuid [not null, note: 'The bucket this window was folded into. CASCADE on delete.']
+  "agent_id" text
+  "src_vm_id" text
+  "dst_vm_id" text
+  "src_ip" inet [not null]
+  "dst_ip" inet [not null]
+  "src_port" int4
+  "dst_port" int4
+  "protocol" protocol [not null]
+  "direction" direction [not null]
+  "scope" flow_scope [not null]
+  "bytes_sent" int8 [not null, default: 0]
+  "bytes_received" int8 [not null, default: 0]
+  // dropped: packets - adds nothing over bytes for topology or health
+  "connection_count" int8 [not null, default: 0]
+  "request_count" int8 [not null, default: 0]
+  "first_seen" timestamptz [not null]
+  "last_seen" timestamptz [not null]
+  "observed_at" timestamptz [not null, default: `now()`, note: 'When the request was accepted. The only time column safe for rate windows.']
+  "error_count" int8 [not null, default: 0]
+  "retransmission_count" int8 [not null, default: 0]
+  "avg_rtt_ms" float8 [not null, default: 0]
+  // dropped: avg_app_delay_ms - same as network_flows.avg_app_delay_ms
+  "http_1xx_count" int8 [not null, default: 0]
+  "http_2xx_count" int8 [not null, default: 0]
+  "http_3xx_count" int8 [not null, default: 0]
+  "http_4xx_count" int8 [not null, default: 0]
+  "http_5xx_count" int8 [not null, default: 0]
+  "last_http_status" int4
+
+  Indexes {
+    flow_id [type: btree, name: "idx_flow_observations_flow_id"]
+    observed_at [type: btree, name: "idx_flow_observations_observed_at"]
+    (scope, observed_at) [type: btree, name: "idx_flow_observations_scope_observed_at"]
+  }
+  Note: 'Append-only event log, one row per accepted ingest request. Counters are the WINDOW DELTA exactly as posted and latency is the raw window average, the opposite semantics of network_flows. Use this for rates and time series. Nothing deletes from this table: it grows one row per bucket per FLOW_INTERVAL (2s) per agent, forever.'
+}
+
+Table "external_hosts" [headercolor: #16a085] {
+  "id" uuid [pk, not null, default: `gen_random_uuid()`]
+  "ip" inet [unique, not null]
+  // dropped: domain - enrichment that nothing populates
+  // dropped: asn - enrichment that nothing populates
+  // dropped: country - enrichment that nothing populates
+  // dropped: provider - enrichment that nothing populates
+  "first_seen" timestamptz [not null, default: `now()`]
+  "last_seen" timestamptz [not null, default: `now()`]
+  Note: 'Peer registry for public addresses and out-of-inventory private ones. Written on ingest, unique on ip.'
+}
+
+Table "unknown_internal_hosts" [headercolor: #16a085] {
+  "id" uuid [pk, not null, default: `gen_random_uuid()`]
+  "ip" inet [unique, not null]
+  "first_seen" timestamptz [not null, default: `now()`]
+  "last_seen" timestamptz [not null, default: `now()`]
+  "resolved_vm_id" text
+  Note: 'Private peers inside INTERNAL_CIDRS that are not registered VMs. When an agent later registers with that IP the row gains resolved_vm_id and the affected flows are re-pointed at the VM.'
+}
+
+// ======================================================================
+// Reachability (active probe)
+// ======================================================================
+
+Table "connection_probes" [headercolor: #e67e22] {
+  "id" uuid [pk, not null, default: `gen_random_uuid()`]
+  "agent_id" text [not null]
+  "src_vm_id" text [not null]
+  "dst_vm_id" text
+  "src_ip" inet [not null]
+  "dst_ip" inet [not null]
+  "protocol" protocol [not null, default: 'tcp']
+  "dst_port" int4 [not null, default: 18081]
+  "source" text [not null, default: 'vmlens_probe']
+  "probe_type" text [not null, default: 'connectivity_check']
+  "success" bool [not null, default: false, note: 'Reachable at the probe layer only.']
+  "rtt_ms" float8 [not null, default: 0, note: 'Probe wall-clock elapsed time. NOT the kernel TCP RTT in network_flows.avg_rtt_ms.']
+  "error" text
+  "first_seen" timestamptz [not null, default: `now()`]
+  "last_seen" timestamptz [not null, default: `now()`]
+  "observed_at" timestamptz [not null, default: `now()`]
+
+  Indexes {
+    (agent_id, src_vm_id, dst_vm_id, dst_ip, protocol, dst_port) [type: btree, unique, name: "uq_connection_probes_pair"]
+    (success, observed_at) [type: btree, name: "idx_connection_probes_recent"]
+    (src_vm_id, observed_at) [type: btree, name: "idx_connection_probes_src_vm"]
+  }
+  Note: 'Active probe results: CURRENT STATE, NOT HISTORY. The unique index on (agent_id, src_vm_id, dst_vm_id, dst_ip, protocol, dst_port) makes each new result overwrite the previous one, so a flapping path is indistinguishable from a stable one. Feeds graph edges with kind=reachability, which must never be drawn as workload traffic.'
+}
+
+// ======================================================================
+// Groups
+// ======================================================================
+
+TableGroup "Identity (agent + inventory)" {
+  agents
+  vms
+  vm_interfaces
+}
+
+TableGroup "Observed traffic (eBPF)" {
+  network_flows
+  flow_observations
+  external_hosts
+  unknown_internal_hosts
+}
+
+TableGroup "Reachability (active probe)" {
+  connection_probes
+}
+
+// ======================================================================
+// Relations
+// ======================================================================
+
+Ref "connection_probes_agent_id_fkey":"agents"."id" <? "connection_probes"."agent_id" [delete: cascade]
+Ref "connection_probes_dst_vm_id_fkey":"vms"."id" ?<? "connection_probes"."dst_vm_id" [delete: set null]
+Ref "connection_probes_src_vm_id_fkey":"vms"."id" <? "connection_probes"."src_vm_id" [delete: cascade]
+Ref "flow_observations_agent_id_fkey":"agents"."id" ?<? "flow_observations"."agent_id" [delete: set null]
+Ref "flow_observations_dst_vm_id_fkey":"vms"."id" ?<? "flow_observations"."dst_vm_id" [delete: set null]
+Ref "flow_observations_flow_id_fkey":"network_flows"."id" <? "flow_observations"."flow_id" [delete: cascade]
+Ref "flow_observations_src_vm_id_fkey":"vms"."id" ?<? "flow_observations"."src_vm_id" [delete: set null]
+Ref "network_flows_agent_id_fkey":"agents"."id" ?<? "network_flows"."agent_id" [delete: set null]
+Ref "network_flows_dst_vm_id_fkey":"vms"."id" ?<? "network_flows"."dst_vm_id" [delete: set null]
+Ref "network_flows_src_vm_id_fkey":"vms"."id" ?<? "network_flows"."src_vm_id" [delete: set null]
+Ref "unknown_internal_hosts_resolved_vm_id_fkey":"vms"."id" ?<? "unknown_internal_hosts"."resolved_vm_id" [delete: set null]
+Ref "vm_interfaces_vm_id_fkey":"vms"."id" <? "vm_interfaces"."vm_id" [delete: cascade]
